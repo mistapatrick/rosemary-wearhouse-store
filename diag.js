@@ -1,0 +1,3 @@
+setTimeout(function(){var a=document.getElementById("app");
+if(a&&a.textContent.indexOf("Loading")===0&&a.children.length===1){a.innerHTML='<div class="card"><h2>The app did not start</h2><p>Press F12, open the Console tab and read the red message. Most common causes:</p><p>1. index.html, app.js and styles.css are from different versions (copy all three from the same zip, then press Ctrl+Shift+R).<br>2. config.js is missing or still has placeholder values.<br>3. You opened the file directly instead of http://localhost:8000.</p></div>'}},5000);
+window.addEventListener("error",function(e){var a=document.getElementById("app");if(a)a.insertAdjacentHTML("beforeend",'<p class="err">Error: '+String(e.message).replace(/</g,"&lt;")+'</p>')});
