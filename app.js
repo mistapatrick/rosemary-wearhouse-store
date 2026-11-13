@@ -1,5 +1,6 @@
 import {createClient} from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 import {SUPABASE_URL,SUPABASE_ANON_KEY} from "./config.js";
+import {STORE} from "./store.js";
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 const $=s=>document.querySelector(s),app=$("#app");
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -15,6 +16,23 @@ const eff=i=>i.price_ngn==null?0:Math.round(i.price_ngn*(1-(+i.discount_pct||0)/
 const showPrice=(i,dis=true)=>{const d=dis?1-(+i.discount_pct||0)/100:1,hasN=i.price_ngn!=null;
  if(cur=="USD"){const u=i.price_usd!=null?+i.price_usd:hasN?i.price_ngn/FX:null;return u==null?"—":money(u*d)}
  return hasN?ngn(Math.round(i.price_ngn*d)):i.price_usd!=null?"≈"+ngn(Math.ceil(i.price_usd*FX/500)*500):"—"};
+const PAPER=()=>localStorage.getItem("rw_paper")=="58"?58:80;
+function rcptHTML(r){
+ const n=x=>"₦"+Math.round(x).toLocaleString("en-NG"),dt=new Date(r.at).toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+ const units=r.lines.reduce((a,l)=>a+l.qty,0),saved=r.lines.reduce((a,l)=>a+Math.max(0,(+l.list||l.price)-l.price)*l.qty,0),row=(a,b,c="")=>`<div class="rr ${c}"><span>${a}</span><span>${b}</span></div>`;
+ return`<div class="rcpt" style="width:${PAPER()==58?"48mm":"72mm"}"><div class="rc c b big">${esc(STORE.name)}</div>${(STORE.lines||[]).filter(Boolean).map(t=>`<div class="rc c">${esc(t)}</div>`).join("")}${r.reprint?'<div class="rc c b">*** REPRINT ***</div>':""}<hr>
+${row("Receipt",esc(r.no))}${row("Date",esc(dt))}${row("Cashier",esc(r.cashier))}${r.customer?row("Customer",esc(r.customer)):""}<hr>
+${r.lines.map(l=>`<div class="rc b">${esc(l.name)}</div><div class="rc sm">${esc(l.sku)}</div>${row(l.qty+" x "+n(l.price),n(l.qty*l.price))}${+l.list>l.price?`<div class="rc sm">was ${n(l.list)} each</div>`:""}`).join("")}<hr>
+${row("Items",units)}${row("TOTAL",n(r.total),"tot")}${row("Paid by",esc(r.pay))}${saved>0?row("You saved",n(saved)):""}<hr>
+${(STORE.footer||[]).filter(Boolean).map(t=>`<div class="rc c">${esc(t)}</div>`).join("")}${STORE.policy?`<div class="rc c sm">${esc(STORE.policy)}</div>`:""}${STORE.credit?`<div class="rc c sm">${esc(STORE.credit)}</div>`:""}</div>`}
+function printRcpt(r){let a=$("#rcpt-area");if(!a){a=document.createElement("div");a.id="rcpt-area";document.body.appendChild(a)}
+ a.innerHTML=rcptHTML(r);const h=Math.ceil(a.firstElementChild.getBoundingClientRect().height*25.4/96)+6;
+ const st=document.createElement("style");st.textContent=`@page{size:${PAPER()}mm ${h}mm;margin:0}`;document.head.appendChild(st);
+ const t=document.title;document.title=r.no;document.body.classList.add("printing-rcpt");
+ const done=()=>{document.body.classList.remove("printing-rcpt");st.remove();document.title=t;removeEventListener("afterprint",done)};
+ addEventListener("afterprint",done);print()}
+function showReceipt(r){app.innerHTML=`<div class="row np" style="margin-bottom:8px"><button class="b" id="rp">Print receipt</button><button class="b s" id="rpdf">Save as PDF</button><button class="b o" id="rn">New sale</button><label class="mut" style="margin:0">Paper <select id="pp" style="width:auto;display:inline"><option value="80" ${PAPER()==80?"selected":""}>80 mm</option><option value="58" ${PAPER()==58?"selected":""}>58 mm</option></select></label></div><p class="mut np">Print receipt: choose your thermal printer. Save as PDF: choose "Save as PDF" as the destination. The file is named after the receipt number.</p><div class="rcpt-wrap">${rcptHTML(r)}</div>`;
+ $("#rp").onclick=$("#rpdf").onclick=()=>printRcpt(r);$("#rn").onclick=show;$("#pp").onchange=e=>{localStorage.setItem("rw_paper",e.target.value);showReceipt(r)}}
 async function loadFx(){const {data}=await sb.rpc("current_fx");if(data)FX=+data;const {data:h}=await sb.from("fx_rates").select("rate").order("day",{ascending:false}).limit(7);FXR=h&&h.length?[Math.min(...h.map(x=>+x.rate)),Math.max(...h.map(x=>+x.rate))]:null}
 function chrome(){const on=sup();if(!$("#fxc")||!$("#cur"))return;$("#fxc").classList.toggle("hide",!on);$("#cur").classList.toggle("hide",!on);$("#fxc").textContent="$1 = ₦"+Math.round(FX).toLocaleString("en-NG");$("#fxc").title=FXR?"7-day range ₦"+Math.round(FXR[0])+" – ₦"+Math.round(FXR[1]):"";$("#cur").textContent=cur=="USD"?"$ USD":"₦ NGN"}
 async function refreshFx(force){try{const {data:st}=await sb.from("settings").select("*");const m=Object.fromEntries((st||[]).map(x=>[x.key,x.value]));if(!force&&m.fx_mode!="auto")return;
@@ -45,11 +63,19 @@ recv:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2
 pos:'<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
 rates:'<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
 users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'};
-function nav(){const t=sup()?[["dash","Dashboard"],["ana","Analytics"],["stock","Stock"],["items","Items"],["batches","Batches"],["recv","Receiving"],["pos","POS"],["rates","Rates"]]:[["recv","Receiving"],["pos","POS"],["items","Stock"]];
- if(me.role=="admin")t.push(["users","Users"]);
- const ic=k=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[k==="items"&&!sup()?"stock":k]}</svg>`;
- $("#nav").innerHTML=t.map(([k,l])=>`<button data-t="${k}" class="${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("");
- $("#nav").onclick=e=>{const k=e.target.closest("button")?.dataset.t;if(k){tab=k;openB=null;nav();show()}}}
+IC.more='<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>';
+IC.out='<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>';
+const closeSheet=()=>{const d=$("#sheet");if(d)d.remove()};
+function nav(){closeSheet();
+ const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1]];
+ if(me.role=="admin")all.push(["users","Users"]);
+ const ic=k=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[k==="items"&&!sup()?"stock":k]}</svg>`,sec=all.filter(t=>!t[2]),secOn=sec.some(t=>t[0]==tab);
+ $("#nav").innerHTML=all.map(([k,l,p])=>`<button data-t="${k}" class="${p?"":"sec "}${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")+(sec.length?`<button data-more="1" class="more ${secOn?"on":""}" aria-label="More options">${ic("more")}<span>More</span></button>`:"");
+ $("#nav").onclick=e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.more)return openSheet(sec,ic);const k=b.dataset.t;if(k){tab=k;openB=null;nav();show()}}}
+function openSheet(sec,ic){closeSheet();const d=document.createElement("div");d.id="sheet";
+ d.innerHTML=`<div class="sh-bg"></div><div class="sh-box"><div class="sh-grip"></div>${sec.map(([k,l])=>`<button data-t="${k}" class="${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")}<button data-out="1">${ic("out")}<span>Sign out</span></button></div>`;
+ document.body.appendChild(d);
+ d.onclick=e=>{const b=e.target.closest("button");if(!b){if(e.target.classList.contains("sh-bg"))closeSheet();return}if(b.dataset.out){closeSheet();return $("#out").click()}tab=b.dataset.t;openB=null;nav();show()}}
 const show=async()=>{app.innerHTML='<p class="mut">Loading…</p>';try{app.innerHTML=await({dash,ana,stock,items,batches,recv,pos,users,rates}[tab])();wire()}catch(e){app.innerHTML=`<p class="err">${esc(e.message)}</p>`}};
 const A=(s,fn)=>app.querySelectorAll(s).forEach(fn);
 async function dash(){
@@ -136,13 +162,13 @@ async function recv(){
  const {data}=await sb.from("items").select("*").eq("status","in_transit").order("sku");
  return`<h2>Receiving</h2><p class="mut">${me.role=="owner"?"Items stay here until store staff confirm they have seen them.":"Count each item, enter the quantity you actually received, then confirm."}</p><div class="card">${data.map(i=>`<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)"><div><span class="sku">${esc(i.sku)}</span><br>${esc(i.brand||"")} ${esc(i.name)} · ${esc(i.size||"")}<div class="mut">Sent: ${i.qty}</div></div>${me.role=="owner"?'<span class="tag wt">Awaiting staff</span>':`<div class="row"><input type="number" min="0" value="${i.qty}" style="width:80px;margin:0" id="r${i.id}"><button class="b sm" data-rc="${i.id}">Confirm</button></div>`}</div>`).join("")||'<p class="mut">Nothing in transit.</p>'}</div>`}
 async function pos(){
- const data=await all(()=>sb.from("items").select("id,sku,name,brand,size,stock,price_ngn,discount_pct").eq("status","in_stock").order("sku"));window._st=data;
+ const data=await all(()=>sb.from("items").select("id,sku,name,brand,size,stock,price_ngn,discount_pct").eq("status","in_stock").order("sku"));window._st=data;const {data:rs}=await sb.from("sales").select("id,receipt,sold_at,total,payment,customer,cashier").order("sold_at",{ascending:false}).limit(10);window._rs=rs||[];
  const tot=cart.reduce((a,l)=>a+l.qty*l.price,0);
  return`<h2>Point of sale</h2><div class="g" style="align-items:start"><div class="card np"><h3>Find item</h3><input id="ps" placeholder="Scan or type SKU / name" autofocus><div id="pr"></div></div>
 <div class="card"><h3>Cart</h3>${cart.map((l,i)=>`<div class="row sp" style="margin-bottom:8px"><span style="flex:1"><span class="sku">${esc(l.sku)}</span><br>${esc(l.name)}</span><input type="number" min="1" max="${l.max}" value="${l.qty}" data-cq="${i}" style="width:60px;margin:0"><input type="number" min="${sup()?0:l.min}" value="${l.price}" data-cp="${i}" style="width:100px;margin:0"><button class="b o sm" data-cx="${i}">✕</button></div>`).join("")||'<p class="mut">Empty</p>'}
-<p><b>Total ${ngn(tot)}</b></p><label>Customer (optional)<input id="cu" maxlength="60"></label><label>Payment<select id="pm"><option>Cash</option><option>Bank Transfer</option><option>POS / Card</option><option>Part Payment</option></select></label><button class="b w" id="co" ${cart.length?"":"disabled"}>Complete sale</button></div></div>`}
+<p><b>Total ${ngn(tot)}</b></p><label>Customer (optional)<input id="cu" maxlength="60"></label><label>Payment<select id="pm"><option>Cash</option><option>Bank Transfer</option><option>POS / Card</option><option>Part Payment</option></select></label><label class="row" style="margin:0 0 10px"><input type="checkbox" id="ap" style="width:auto;margin:0" ${localStorage.getItem("rw_ap")=="1"?"checked":""}> Print receipt automatically</label><button class="b w" id="co" ${cart.length?"":"disabled"}>Complete sale</button></div></div><div class="card np"><h3>Recent sales (tap Reprint)</h3>${(rs||[]).map(x=>`<div class="row sp" style="padding:6px 0;border-bottom:1px solid var(--line)"><span><span class="sku">${esc(x.receipt)}</span> ${new Date(x.sold_at).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}<br><span class="mut">${esc(x.cashier||"")} · ${esc(x.payment||"")}</span></span><span><b>${ngn(x.total)}</b> <button class="b o sm" data-rp="${x.id}">Reprint</button></span></div>`).join("")||'<p class="mut">No sales yet.</p>'}</div>`}
 async function users(){const {data}=await sb.from("profiles").select("*").order("email");
- return`<h2>Users</h2><p class="mut">Create logins in Supabase → Authentication → Users, then set the role here.</p><div class="card tw"><table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th></tr>${data.map(u=>`<tr><td>${esc(u.email)}</td><td>${esc(u.name)}</td><td><select data-ur="${u.id}">${["admin","owner","staff"].map(r=>`<option ${r==u.role?"selected":""}>${r}</option>`).join("")}</select></td><td><input type="checkbox" data-ua="${u.id}" ${u.active?"checked":""} style="width:auto"></td></tr>`).join("")}</table></div>`}
+ return`<h2>Users</h2><p class="mut">Set each person's display name (it prints on receipts as the cashier). Create logins in Supabase → Authentication → Users, then set the role here.</p><div class="card tw"><table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th></tr>${data.map(u=>`<tr><td>${esc(u.email)}</td><td><input data-un="${u.id}" value="${esc(u.name)}" maxlength="40" style="margin:0;min-width:140px"></td><td><select data-ur="${u.id}">${["admin","owner","staff"].map(r=>`<option ${r==u.role?"selected":""}>${r}</option>`).join("")}</select></td><td><input type="checkbox" data-ua="${u.id}" ${u.active?"checked":""} style="width:auto"></td></tr>`).join("")}</table></div>`}
 function renderResults(){const v=$("#ps").value.toLowerCase().trim();
  $("#pr").innerHTML=v?window._st.filter(i=>(i.sku+i.name+(i.brand||"")).toLowerCase().includes(v)).slice(0,8).map(i=>`<div class="row sp" style="padding:6px 0;border-bottom:1px solid var(--line)"><span><span class="sku">${esc(i.sku)}</span><br>${esc(i.brand||"")} ${esc(i.name)} · ${esc(i.size||"")} · ${i.stock} left</span><button class="b sm" data-add="${i.id}">${ngn(eff(i))}${i.discount_pct>0?" (-"+(+i.discount_pct)+"%)":""} +</button></div>`).join(""):""}
 function wire(){
@@ -172,9 +198,14 @@ function wire(){
  A("[data-cq]",i=>i.onchange=()=>{cart[+i.dataset.cq].qty=Math.max(1,Math.min(cart[+i.dataset.cq].max,parseInt(i.value)||1));show()});
  A("[data-cp]",i=>i.onchange=()=>{const l=cart[+i.dataset.cp],v=num(i.value);if(!sup()&&v<l.min){alert("Staff cannot sell below the authorised price of "+ngn(l.min));l.price=l.min}else l.price=v;show()});
  const pe=$("#per");if(pe)pe.onchange=()=>{per=+pe.value;show()};
- const co=$("#co");if(co)co.onclick=async()=>{co.disabled=true;const {data,error}=await sb.rpc("sell",{cust:$("#cu").value,pay:$("#pm").value,lines:cart.map(l=>({item_id:l.item_id,qty:l.qty,price:l.price}))});
-  if(error){co.disabled=false;return fail(error)}const tot=cart.reduce((a,l)=>a+l.qty*l.price,0),ls=cart.slice();cart=[];
-  app.innerHTML=`<div class="card"><h2>Receipt ${esc(data)}</h2><p>${new Date().toLocaleString()}</p>${ls.map(l=>`<div class="row sp"><span>${esc(l.name)} ×${l.qty}${l.list>l.price?` <s class="mut">${ngn(l.list)}</s>`:""}</span><span>${ngn(l.qty*l.price)}</span></div>`).join("")}<h3>Total ${ngn(tot)}</h3><div class="row np"><button class="b s" onclick="print()">Print</button><button class="b o" id="nw">New sale</button></div></div>`;$("#nw").onclick=show};
+ const co=$("#co");if(co)co.onclick=async()=>{co.disabled=true;const cust=$("#cu").value.trim(),pay=$("#pm").value,ls=cart.slice();
+  const {data,error}=await sb.rpc("sell",{cust,pay,lines:ls.map(l=>({item_id:l.item_id,qty:l.qty,price:l.price}))});if(error){co.disabled=false;return fail(error)}cart=[];
+  const r={no:data,at:new Date().toISOString(),cashier:me.name||me.email,customer:cust,pay,lines:ls.map(l=>({sku:l.sku,name:l.name,qty:l.qty,price:l.price,list:l.list})),total:ls.reduce((a,l)=>a+l.qty*l.price,0)};
+  showReceipt(r);if(localStorage.getItem("rw_ap")=="1")printRcpt(r)};
+ const ap=$("#ap");if(ap)ap.onchange=()=>localStorage.setItem("rw_ap",ap.checked?"1":"0");
+ A("[data-rp]",b=>b.onclick=async()=>{const x=window._rs.find(y=>y.id==b.dataset.rp),{data:ls,error}=await sb.from("sale_lines").select("sku,name,qty,unit_price,list_price").eq("sale_id",x.id);if(error)return fail(error);
+  showReceipt({no:x.receipt,at:x.sold_at,cashier:x.cashier||"—",customer:x.customer||"",pay:x.payment,reprint:true,lines:ls.map(l=>({sku:l.sku,name:l.name,qty:l.qty,price:l.unit_price,list:l.list_price})),total:x.total})});
+ A("[data-un]",i=>i.onchange=async()=>{const {error}=await sb.from("profiles").update({name:i.value.trim()}).eq("id",i.dataset.un);if(error)fail(error)});
  A("[data-ur]",s=>s.onchange=async()=>{const {error}=await sb.from("profiles").update({role:s.value}).eq("id",s.dataset.ur);if(error)fail(error)});
  A("[data-ua]",s=>s.onchange=async()=>{const {error}=await sb.from("profiles").update({active:s.checked}).eq("id",s.dataset.ua);if(error)fail(error)})}
 boot();

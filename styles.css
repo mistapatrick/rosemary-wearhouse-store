@@ -4,7 +4,7 @@ header{background:var(--ink);color:var(--cream);padding:calc(10px + env(safe-are
 header img{width:42px;height:42px;border-radius:50%;background:var(--cream)}header b{font:600 18px Georgia,serif;display:block;line-height:1.1}header small{opacity:.7;font-size:12px}header .hr{margin-left:auto}header .chip{font-size:12px;background:#1b2128;padding:5px 9px;border-radius:99px}s{opacity:.6}
 main{max-width:1000px;margin:0 auto;padding:16px}
 nav{position:fixed;bottom:0;left:0;right:0;background:var(--ink);display:flex;padding-bottom:env(safe-area-inset-bottom,0px);z-index:6}
-nav{overflow-x:auto}nav button{flex:1 0 68px;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;color:#b9b3a4;padding:8px 2px;font:inherit;font-size:11px;cursor:pointer}nav svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+nav button{flex:1 1 0;min-width:0;min-height:58px;justify-content:center;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;color:#b9b3a4;padding:8px 2px;font:inherit;font-size:11px;cursor:pointer}nav svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .card{background:var(--cream);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 h2{font:600 22px Georgia,serif;margin:4px 0 12px}h3{margin:0 0 8px;font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--gold)}
 label{display:block;font-size:13px;color:var(--mut);margin-bottom:10px}
@@ -20,3 +20,20 @@ input,select{width:100%;font:inherit;padding:11px;border:1px solid #cfc4aa;borde
 .login{max-width:360px;margin:8vh auto}
 @media print{header,nav,.np{display:none!important}body{background:#fff}}
 .note{background:#fff3d6;border:1px solid #e8c36a;border-radius:10px;padding:10px 12px;margin:8px 0 12px;font-size:14px;color:#5a4200}.note:empty{display:none}.foot{text-align:center;padding:14px 12px;font-size:12px;color:var(--mut);line-height:1.8}.foot a{color:var(--rose);font-weight:600}#fxc{cursor:pointer}
+#rcpt-area{position:absolute;left:-9999px;top:0;background:#fff}
+.rcpt{font-family:"Courier New",ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.4;color:#000;background:#fff;padding:3mm 0;margin:0 auto}
+.rcpt hr{border:0;border-top:1px dashed #000;margin:6px 0}.rc{word-break:break-word}.rc.c{text-align:center}.rc.b{font-weight:700}.rc.big{font-size:15px}.rc.sm{font-size:10px}
+.rr{display:flex;justify-content:space-between;gap:6px}.rr.tot{font-size:15px;font-weight:700}
+.rcpt-wrap{display:flex;justify-content:center;padding:12px 0}.rcpt-wrap .rcpt{box-shadow:0 2px 14px rgba(0,0,0,.25);padding:10px 8px;box-sizing:content-box}
+@media print{body.printing-rcpt>*:not(#rcpt-area){display:none!important}body.printing-rcpt{background:#fff;padding:0;margin:0}body.printing-rcpt #rcpt-area{position:static;left:auto}}
+nav span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:700px){nav .sec{display:none}}
+@media(min-width:701px){nav .more{display:none}}
+#sheet{position:fixed;inset:0;z-index:20}.sh-bg{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.sh-box{position:absolute;left:0;right:0;bottom:0;background:var(--cream);border-radius:18px 18px 0 0;padding:12px 12px calc(16px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-height:75vh;overflow:auto}
+.sh-grip{grid-column:1/-1;width:40px;height:4px;background:#cfc4aa;border-radius:2px;margin:0 auto 4px}
+.sh-box button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px 6px;border:1px solid var(--line);border-radius:14px;background:#fff;font:inherit;font-size:13px;color:var(--ink);min-height:80px;cursor:pointer}
+.sh-box button.on{border-color:var(--rose);color:var(--rose)}
+.sh-box svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media(max-width:600px){header{position:static;flex-wrap:wrap}header .hr{width:100%}header #out{margin-left:auto}header b{font-size:16px}}
+.tw{background:linear-gradient(90deg,var(--cream) 30%,rgba(255,252,240,0)),linear-gradient(90deg,rgba(255,252,240,0),var(--cream) 70%) 100% 0,radial-gradient(farthest-side at 0 50%,rgba(0,0,0,.28),rgba(0,0,0,0)),radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.28),rgba(0,0,0,0)) 100% 0;background-repeat:no-repeat;background-color:var(--cream);background-size:40px 100%,40px 100%,14px 100%,14px 100%;background-attachment:local,local,scroll,scroll}
