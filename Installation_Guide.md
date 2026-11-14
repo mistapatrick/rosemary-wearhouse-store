@@ -157,3 +157,40 @@ Tick each box as you go. If a step does not look like what is described, stop an
 3. **How pricing now works:** the owner enters US purchases and selling prices in **dollars**. A yellow notice above *Save & generate SKU* suggests the naira equivalent and 7-day range. When staff press **Confirm** in Receiving, the naira price is fixed at that day's rate and appears in **Stock** (owner/admin have their own **Stock** tab showing ₦ and $ prices).
 4. The **Rates** tab has a two-way $ ⇄ ₦ converter. Tapping the rate chip at the top opens it.
 5. Feedback: call or WhatsApp +234 905 390 3530 (links are in the app footer).
+
+---
+## Part 11 — Version 2.2: receipts for a thermal roll printer
+1. **Database:** SQL Editor → run `supabase/06_receipts.sql` once (after `05`).
+2. **Files:** copy `app.js`, `styles.css`, `index.html` and the new `store.js` into your project (keep your own `config.js`). Edit `store.js` to put the shop address and phone on the receipt. Test locally, then `git add . && git commit -m "v2.2 receipts" && git push`.
+3. **After every sale** a roll-style receipt appears: items, quantity x price, line totals, discounts, total, payment method, customer, the **cashier's name**, date and time.
+4. **Print receipt** opens the print window: choose the thermal printer (80 mm or 58 mm; set *Paper* on the receipt screen). **Save as PDF**: choose *Save as PDF* as the destination. The page is cut to the receipt's length, and the file is named after the receipt number.
+5. **Fast checkout:** tick *Print receipt automatically* at the POS. To print with no dialog at all, start Chrome on the store computer with the `--kiosk-printing` option (the default printer then prints instantly). Ask the developer to set this up once.
+6. **Reprint:** POS page, *Recent sales*, tap **Reprint** (marked REPRINT on the receipt).
+7. **Cashier names:** the admin sets each person's display name in the **Users** tab. New sales use it.
+
+---
+## Part 12 — Version 2.4: Excel export, Excel import of old records, backup reminder
+1. **Database:** SQL Editor → run `supabase/07_backup_import.sql` once (after `06`).
+2. **Files:** copy `app.js` and `index.html` into your project (keep `config.js`, `store.js`, `diag.js`). Test, then `git add . && git commit -m "v2.4 backup and import" && git push`.
+3. **Data tab** (owner and admin; on a phone it is under **More**):
+   - **Export everything to Excel** downloads one workbook: Summary, Items, Batches, Sales, Exchange rates and Codes. This also records the date of the last backup.
+   - **Reminder:** the owner sees a banner on every screen when the last backup is older than 7, 14 or 30 days (her choice). *Remind me tomorrow* hides it for a day.
+   - **Import old records:** *Download Excel template*, fill it in, *Choose your file*, review the preview, then **Import**. Errors are listed by sheet and row, and nothing is saved until the file is clean.
+4. **How old records are filed:** items go into a batch for their ship month, and SKUs carry that old month, with serial numbers assigned oldest first. Sales keep their original dates and appear in the right months in Analytics. Importing the same file twice is safe.
+5. The Excel library is loaded from jsDelivr (pinned to ExcelJS 4.4.0) only when the Data tab is used.
+
+---
+## Part 13 — Version 2.5: automatic sign-out after 30 minutes of inactivity
+1. **No database change.** Copy `app.js`, `styles.css` and `index.html` into your project (keep `config.js`, `store.js`, `diag.js`), then `git add . && git commit -m "v2.5 idle sign-out" && git push`.
+2. Every account (owner, admin, staff) is signed out after 30 minutes with no tapping, typing, scrolling or mouse movement. Two minutes before, a *Still there?* box counts down with **Stay signed in** and **Sign out now**.
+3. If the device sleeps or the browser is closed and reopened after more than 30 minutes, the person must sign in again. Signing out in one browser tab signs out the other tabs too.
+4. Unsaved work (for example a half-filled POS cart or item form) is lost at sign-out, which is why the warning appears first.
+5. To change the time, edit `IDLE_MS` near the top of `app.js` (30*60*1000 = 30 minutes).
+6. **Security note:** this ends the session on that device. It does not invalidate the login on the Supabase side, and Supabase's server-enforced inactivity timeout is a paid-plan feature. For a shared store computer this is the right protection; a lost phone should still be handled by changing that person's password in Supabase.
+
+---
+## Part 14 — Version 2.6: speed
+1. **Database:** SQL Editor → run `supabase/08_speed.sql` once (after `07`). It adds indexes and makes the security rules cheaper to evaluate.
+2. **Files:** copy `app.js`, `styles.css` and `index.html` (keep `config.js`, `store.js`, `diag.js`). Test, then `git add . && git commit -m "v2.6 speed" && git push`.
+3. **What changed in the app:** lists are cached for 30 seconds (any save clears the cache), the search box waits until you stop typing, the POS no longer reloads the stock list on every tap, start-up loads its data in parallel, and a thin progress bar shows while a page is loading.
+4. **The biggest remaining factor is distance to the database.** In Supabase: Project Settings → General (or Infrastructure) shows the project's region. If it is in the US or Asia, create a new project in a European region and move the data (export from the Data tab, run the SQL files `01`–`08` in the new project, import, and update `config.js`). Compare before deciding: DevTools → Network, click a request to supabase.co and look at *Waiting for server response*. Consistently over about 300 ms means distance is the problem.

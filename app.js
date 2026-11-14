@@ -2,6 +2,12 @@ import {createClient} from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2
 import {SUPABASE_URL,SUPABASE_ANON_KEY} from "./config.js";
 import {STORE} from "./store.js";
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+{const pc=document.createElement("link");pc.rel="preconnect";pc.href=SUPABASE_URL;document.head.appendChild(pc)}
+// short-lived cache for read queries; any write clears it
+const AC=new Map();
+{const _f=sb.from.bind(sb),_r=sb.rpc.bind(sb);
+ sb.from=t=>{const b=_f(t);["insert","update","upsert","delete"].forEach(m=>{const g=b[m].bind(b);b[m]=(...a)=>{AC.clear();return g(...a)}});return b};
+ sb.rpc=(n,...a)=>{if(n!="cost_batch"&&n!="current_fx")AC.clear();return _r(n,...a)}}
 const $=s=>document.querySelector(s),app=$("#app");
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ngn=n=>"₦"+Math.round(+n||0).toLocaleString("en-NG"),num=v=>{const n=parseFloat(v);return isFinite(n)&&n>=0?n:0};
@@ -55,7 +61,7 @@ async function dataPage(){
 <p class="mut"><b>How old records are placed:</b> each item goes into a batch for the month it was shipped, and its SKU carries that old month (for example 0323 for March 2023). Records are filed oldest first, so serial numbers follow the real order. Sales keep their original dates, so Analytics shows them in the right months. Importing the same file twice does not create duplicates.</p>
 <div class="row"><button class="b s" id="imp-tpl">Download Excel template</button><label class="b o" style="margin:0;cursor:pointer">Choose your file<input id="imp-file" type="file" accept=".xlsx" class="hide"></label></div>
 <label class="row" style="margin:10px 0 0"><input type="checkbox" id="imp-auto" checked style="width:auto;margin:0"> Create missing categories and colours automatically (3-letter code from the name)</label><div id="imp-out" style="margin-top:12px"></div></div>`}
-async function doExport(){const btn=$("#bk-go");btn.disabled=true;btn.textContent="Preparing…";
+async function doExport(){AC.clear();const btn=$("#bk-go");btn.disabled=true;btn.textContent="Preparing…";
  try{const X=await loadExcel(),wb=new X.Workbook();wb.creator="Rosemary's Wear House";
  const [its,ics,bts,sls,lns,fxs,cds]=await Promise.all([all(()=>sb.from("items").select("*").order("sourced_at").order("id")),all(()=>sb.from("item_costs").select("*").order("item_id")),all(()=>sb.from("batches").select("*").order("ship_date").order("id")),all(()=>sb.from("sales").select("*").order("sold_at").order("id")),all(()=>sb.from("sale_lines").select("*,sale_costs(unit_cost)").order("id")),all(()=>sb.from("fx_rates").select("*").order("day")),all(()=>sb.from("codes").select("*").order("kind").order("name"))]);
  const C=Object.fromEntries(ics.map(c=>[c.item_id,c])),B=Object.fromEntries(bts.map(b=>[b.id,b])),I=Object.fromEntries(its.map(i=>[i.id,i])),S=Object.fromEntries(sls.map(x=>[x.id,x])),dt=v=>v?new Date(v):null,n=v=>v==null||v===""?null:+v;
@@ -146,19 +152,38 @@ async function refreshFx(force){try{const {data:st}=await sb.from("settings").se
  if(r>0){const {error}=await sb.rpc("record_fx",{r:Math.round(r*100)/100,src});if(error)throw error}await loadFx();chrome()}catch(e){console.warn("Rate refresh failed",e);if(force)alert("Could not fetch the rate right now. Set it manually on the Rates page.")}}
 if($("#fxc"))$("#fxc").onclick=()=>{if(sup()){tab="rates";nav();show()}};
 if($("#cur"))$("#cur").onclick=()=>{cur=cur=="USD"?"NGN":"USD";localStorage.setItem("rw_cur",cur);chrome();show()};
+// ---- automatic sign-out after inactivity ----
+const IDLE_MS=30*60*1000,WARN_MS=2*60*1000,LA="rw_last_active",IDLE_MSG="You were signed out after 30 minutes of inactivity. Please sign in again.";
+let lastTouch=0;
+function touch(e){if(!me)return;if(e&&e.target&&e.target.closest&&e.target.closest("#idle"))return;const n=Date.now();if(n-lastTouch>1000){lastTouch=n;localStorage.setItem(LA,String(n));hideIdleWarn()}}
+["pointerdown","keydown","touchstart","scroll","wheel","mousemove"].forEach(ev=>addEventListener(ev,touch,{passive:true,capture:true}));
+const hideIdleWarn=()=>{const d=$("#idle");if(d)d.remove()};
+function showIdleWarn(sec){let d=$("#idle");if(!d){d=document.createElement("div");d.id="idle";d.setAttribute("role","alertdialog");
+ d.innerHTML='<div class="sh-bg"></div><div class="idle-box"><h3>Still there?</h3><p>For your security you will be signed out in <b id="idle-s"></b> because of inactivity.</p><button class="b w" id="idle-stay">Stay signed in</button><button class="b o w" id="idle-out" style="margin-top:8px">Sign out now</button></div>';
+ document.body.appendChild(d);$("#idle-stay").onclick=()=>{localStorage.setItem(LA,String(Date.now()));hideIdleWarn()};$("#idle-out").onclick=()=>forceOut(false)}
+ $("#idle-s").textContent=Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")}
+async function forceOut(auto){me=null;cart=[];BK=null;hideIdleWarn();closeSheet();window._st=window._rs=window._imp=null;const ra=$("#rcpt-area");if(ra)ra.remove();
+ try{await sb.auth.signOut({scope:"local"})}catch(_){}
+ localStorage.removeItem(LA);if(auto)localStorage.setItem("rw_logout",String(Date.now()));
+ $("#who").textContent="Inventory & POS";$("#fxc").classList.add("hide");$("#cur").classList.add("hide");loginView();
+ if(auto){const le=$("#le");le.className="mut";le.textContent=IDLE_MSG}}
+function idleCheck(){if(!me)return;const idle=Date.now()-(+localStorage.getItem(LA)||Date.now());
+ if(idle>=IDLE_MS)return forceOut(true);if(idle>=IDLE_MS-WARN_MS)showIdleWarn(Math.ceil((IDLE_MS-idle)/1000));else hideIdleWarn()}
+setInterval(idleCheck,1000);addEventListener("visibilitychange",idleCheck);addEventListener("focus",idleCheck);
+addEventListener("storage",e=>{if(e.key=="rw_logout"&&me)forceOut(false)});
 async function boot(){
  const {data:{session}}=await sb.auth.getSession();
  if(!session)return loginView();
+ const la=+localStorage.getItem(LA);if(la&&Date.now()-la>=IDLE_MS){try{await sb.auth.signOut({scope:"local"})}catch(_){}localStorage.removeItem(LA);loginView();const le=$("#le");le.className="mut";le.textContent=IDLE_MSG;return}
  const {data}=await sb.from("profiles").select("*").eq("id",session.user.id).single();
  if(!data||!data.active){app.innerHTML=`<div class="card login"><p class="err">This account has no access. Ask the admin.</p></div>`;$("#out").classList.remove("hide");return}
- me=data;$("#wa").href="https://wa.me/2349053903530?text="+encodeURIComponent(`Hello Business Labs, feedback on the Rosemary's Wear House app from ${me.name||me.email} (${me.role}): `);$("#who").textContent=`${me.name||me.email} · ${me.role}`;$("#out").classList.remove("hide");
- const {data:cs}=await sb.from("codes").select("*").order("name");codes={};(cs||[]).forEach(c=>(codes[c.kind]??=[]).push(c.name));
- if(!sup())cur="NGN";await loadFx();await loadBk();chrome();tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
+ me=data;localStorage.setItem(LA,String(Date.now()));lastTouch=Date.now();$("#wa").href="https://wa.me/2349053903530?text="+encodeURIComponent(`Hello Business Labs, feedback on the Rosemary's Wear House app from ${me.name||me.email} (${me.role}): `);$("#who").textContent=`${me.name||me.email} · ${me.role}`;$("#out").classList.remove("hide");
+  if(!sup())cur="NGN";await Promise.all([loadCodes(),loadFx(),loadBk()]);chrome();tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
 function loginView(){$("#nav").innerHTML="";$("#out").classList.add("hide");
  app.innerHTML=`<form class="card login" id="lf"><h2>Sign in</h2><label>Email<input name="e" type="email" required autocomplete="username"></label><label>Password<input name="p" type="password" required autocomplete="current-password"></label><p class="err" id="le"></p><button class="b w">Sign in</button></form>`;
  $("#lf").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const {error}=await sb.auth.signInWithPassword({email:f.get("e"),password:f.get("p")});
   if(error)$("#le").textContent="Wrong email or password.";else boot()}}
-$("#out").onclick=async()=>{await sb.auth.signOut();me=null;loginView()};
+$("#out").onclick=()=>forceOut(false);
 const IC={dash:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
 ana:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
 stock:'<path d="M16.5 9.4l-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
@@ -181,7 +206,10 @@ function openSheet(sec,ic){closeSheet();const d=document.createElement("div");d.
  d.innerHTML=`<div class="sh-bg"></div><div class="sh-box"><div class="sh-grip"></div>${sec.map(([k,l])=>`<button data-t="${k}" class="${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")}<button data-out="1">${ic("out")}<span>Sign out</span></button></div>`;
  document.body.appendChild(d);
  d.onclick=e=>{const b=e.target.closest("button");if(!b){if(e.target.classList.contains("sh-bg"))closeSheet();return}if(b.dataset.out){closeSheet();return $("#out").click()}tab=b.dataset.t;openB=null;nav();show()}}
-const show=async()=>{app.innerHTML='<p class="mut">Loading…</p>';try{app.innerHTML=bkBanner()+await({dash,ana,stock,items,batches,recv,pos,users,rates,data:dataPage}[tab])();wire()}catch(e){app.innerHTML=`<p class="err">${esc(e.message)}</p>`}};
+const show=async()=>{const my=++seq;bar(1);const tm=setTimeout(()=>{if(my===seq)app.innerHTML='<p class="mut">Loading…</p>'},200);
+ try{const h=bkBanner()+await({dash,ana,stock,items,batches,recv,pos,users,rates,data:dataPage}[tab])();if(my!==seq)return;app.innerHTML=h;wire()}
+ catch(e){if(my===seq)app.innerHTML=`<p class="err">${esc(e.message)}</p>`}
+ finally{clearTimeout(tm);if(my===seq)bar(0)}};
 const A=(s,fn)=>app.querySelectorAll(s).forEach(fn);
 async function dash(){
  const [it,ic,sl]=await Promise.all([all(()=>sb.from("items").select("id,status,stock,qty,discount_pct").order("id")),all(()=>sb.from("item_costs").select("item_id,landed_ngn").order("item_id")),all(()=>sb.from("sale_lines").select("qty,unit_price,list_price,sale_costs(unit_cost),sales(fx)").order("id"))]);
@@ -192,7 +220,10 @@ async function dash(){
  const K=(l,v)=>`<div class="kpi"><small>${l}</small><b>${v}</b></div>`;
  return`<h2>Dashboard <span class="tag">${cur=="USD"?"US dollars":"Naira"}</span></h2><div class="kpis">${K("Units in store",units)}${K("Stock value (cost)",money(val))}${K("Awaiting staff confirmation",transit)}${K("Revenue",money(rev))}${K("Gross profit",money(rev-cost))}${K("Discounts given",money(dv))}${K("Items on discount (unsold)",onDisc)}</div><p class="mut">Sales are converted at the rate recorded on each sale; stock value at today's rate (₦${Math.round(FX).toLocaleString("en-NG")}/$).</p>`}
 const DAY=864e5;
-async function all(mk){let o=[],f=0;for(;;){const {data,error}=await mk().range(f,f+999);if(error)throw error;o=o.concat(data);if(data.length<1000)return o;f+=1000}}
+async function all(mk,ttl=30000){const k=mk.toString(),h=AC.get(k);if(h&&Date.now()-h.t<ttl)return h.v;let o=[],f=0;for(;;){const {data,error}=await mk().range(f,f+999);if(error)throw error;o=o.concat(data);if(data.length<1000)break;f+=1000}AC.set(k,{t:Date.now(),v:o});return o}
+async function cq(mk,ttl=30000){const k=mk.toString(),h=AC.get(k);if(h&&Date.now()-h.t<ttl)return h.v;const r=await mk();if(!r.error)AC.set(k,{t:Date.now(),v:r});return r}
+const bar=on=>{let b=$("#bar");if(!b){b=document.createElement("div");b.id="bar";document.body.appendChild(b)}b.className=on?"on":""};
+let seq=0,qt;
 const uc=l=>+(Array.isArray(l.sale_costs)?l.sale_costs[0]?.unit_cost:l.sale_costs?.unit_cost)||0;
 const sumBy=(rows,kf,vf)=>{const m={};rows.forEach(r=>{const k=kf(r)||"—";const a=m[k]??={k,rev:0,cost:0,units:0};a.rev+=r.rev;a.cost+=r.cost;a.units+=r.qty;if(vf)vf(a,r)});return Object.values(m)};
 const bars=(title,list,fmt=money)=>{const mx=Math.max(1,...list.map(x=>x[1]));return`<div class="card"><h3>${title}</h3>${list.map(([l,v,s])=>`<div style="margin:7px 0"><div class="row sp mut"><span>${esc(l)}</span><span>${fmt(v)}${s?" · "+esc(s):""}</span></div><div style="background:var(--line);border-radius:6px;height:10px"><div style="width:${Math.max(2,v/mx*100)}%;background:var(--rose);height:10px;border-radius:6px"></div></div></div>`).join("")||'<p class="mut">No data yet.</p>'}</div>`};
@@ -224,7 +255,7 @@ async function ana(){
 <div class="card tw"><h3>Category sell-through &amp; stock cover</h3><table><tr><th>Category</th><th class="n">Received</th><th class="n">Sold</th><th class="n">In stock</th><th class="n">Sell-through</th><th class="n">Weeks of cover*</th></tr>${cats.map(c=>`<tr><td>${esc(c.c)}</td><td class="n">${c.rc}</td><td class="n">${c.s}</td><td class="n">${c.st}</td><td class="n">${c.st_}%</td><td class="n">${c.cov}</td></tr>`).join("")}</table><p class="mut">*Stock ÷ weekly sales rate over the last 30 days. Low cover on a fast seller = reorder; "—" = no sales in 30 days.</p></div>
 <div class="card tw"><h3>Batch profitability (all time)</h3><table><tr><th>Batch</th><th class="n">Landed cost</th><th class="n">Revenue so far</th><th class="n">Profit so far</th><th class="n">Sold</th></tr>${bs.map(b=>`<tr><td>${esc(b.n)}</td><td class="n">${money(b.inv)}</td><td class="n">${money(b.rv)}</td><td class="n">${money(b.pf)}</td><td class="n">${b.st}%</td></tr>`).join("")||'<tr><td colspan="5" class="mut">No batches yet.</td></tr>'}</table></div>`}
 async function items(){
- const [its,ics,{data:bs}]=await Promise.all([all(()=>sb.from("items").select("*").order("sourced_at",{ascending:false}).order("id")),sup()?all(()=>sb.from("item_costs").select("item_id,landed_ngn").order("item_id")):[],sup()?sb.from("batches").select("id,name,fx,pct,mode").eq("status","open"):{data:[]}]);
+ const [its,ics,{data:bs}]=await Promise.all([all(()=>sb.from("items").select("*").order("sourced_at",{ascending:false}).order("id")),sup()?all(()=>sb.from("item_costs").select("item_id,landed_ngn").order("item_id")):[],sup()?cq(()=>sb.from("batches").select("id,name,fx,pct,mode").eq("status","open")):{data:[]}]);
  const lc=Object.fromEntries(ics.map(c=>[c.item_id,+c.landed_ngn||0])),sym=sup()?"$":"₦";
  const f=its.filter(i=>!q||(i.sku+i.name+i.brand).toLowerCase().includes(q.toLowerCase())).slice(0,300);
  const st={sourced:"Sourced (US)",in_transit:"In transit",in_stock:"In stock",sold_out:"Sold out"};
@@ -267,7 +298,7 @@ async function recv(){
  const {data}=await sb.from("items").select("*").eq("status","in_transit").order("sku");
  return`<h2>Receiving</h2><p class="mut">${me.role=="owner"?"Items stay here until store staff confirm they have seen them.":"Count each item, enter the quantity you actually received, then confirm."}</p><div class="card">${data.map(i=>`<div class="row sp" style="padding:8px 0;border-bottom:1px solid var(--line)"><div><span class="sku">${esc(i.sku)}</span><br>${esc(i.brand||"")} ${esc(i.name)} · ${esc(i.size||"")}<div class="mut">Sent: ${i.qty}</div></div>${me.role=="owner"?'<span class="tag wt">Awaiting staff</span>':`<div class="row"><input type="number" min="0" value="${i.qty}" style="width:80px;margin:0" id="r${i.id}"><button class="b sm" data-rc="${i.id}">Confirm</button></div>`}</div>`).join("")||'<p class="mut">Nothing in transit.</p>'}</div>`}
 async function pos(){
- const data=await all(()=>sb.from("items").select("id,sku,name,brand,size,stock,price_ngn,discount_pct").eq("status","in_stock").order("sku"));window._st=data;const {data:rs}=await sb.from("sales").select("id,receipt,sold_at,total,payment,customer,cashier").order("sold_at",{ascending:false}).limit(10);window._rs=rs||[];
+ const data=await all(()=>sb.from("items").select("id,sku,name,brand,size,stock,price_ngn,discount_pct").eq("status","in_stock").order("sku"));window._st=data;const {data:rs}=await cq(()=>sb.from("sales").select("id,receipt,sold_at,total,payment,customer,cashier").order("sold_at",{ascending:false}).limit(10));window._rs=rs||[];
  const tot=cart.reduce((a,l)=>a+l.qty*l.price,0);
  return`<h2>Point of sale</h2><div class="g" style="align-items:start"><div class="card np"><h3>Find item</h3><input id="ps" placeholder="Scan or type SKU / name" autofocus><div id="pr"></div></div>
 <div class="card"><h3>Cart</h3>${cart.map((l,i)=>`<div class="row sp" style="margin-bottom:8px"><span style="flex:1"><span class="sku">${esc(l.sku)}</span><br>${esc(l.name)}</span><input type="number" min="1" max="${l.max}" value="${l.qty}" data-cq="${i}" style="width:60px;margin:0"><input type="number" min="${sup()?0:l.min}" value="${l.price}" data-cp="${i}" style="width:100px;margin:0"><button class="b o sm" data-cx="${i}">✕</button></div>`).join("")||'<p class="mut">Empty</p>'}
@@ -295,7 +326,7 @@ function wire(){
   const note=p>0?(prompt("Reason (shown in reports)","Aged stock")||""):"";const {error}=await sb.rpc("set_discount",{i:d.disc,pct:p,note});if(error)return fail(error);show()});
  const rf=$("#rf");if(rf)rf.onsubmit=async e=>{e.preventDefault();const f=new FormData(rf);const {error}=await sb.from("settings").upsert([{key:"fx_mode",value:f.get("mode")},{key:"fx_manual",value:String(num(f.get("manual"))||1500)},{key:"fx_buffer",value:String(+f.get("buffer")||0)}]);if(error)return fail(error);await loadFx();chrome();show()};
  const fn=$("#fxnow");if(fn)fn.onclick=async()=>{fn.disabled=true;await refreshFx(true);show()};
- const qi=$("#q");if(qi)qi.oninput=()=>{q=qi.value;const p=qi.selectionStart;show().then(()=>{const n=$("#q");n.focus();n.setSelectionRange(p,p)})};
+ const qi=$("#q");if(qi)qi.oninput=()=>{clearTimeout(qt);qt=setTimeout(()=>{q=qi.value;const p=qi.selectionStart;show().then(()=>{const n=$("#q");if(n){n.focus();n.setSelectionRange(p,p)}})},200)};
  A("[data-rc]",b=>b.onclick=async()=>{const {error}=await sb.rpc("confirm_receipt",{i:b.dataset.rc,got:parseInt($("#r"+b.dataset.rc).value)||0});if(error)return fail(error);show()});
  const ps=$("#ps");if(ps){ps.oninput=renderResults;renderResults()}
  app.onclick=e=>{const d=e.target.dataset;if(d.add){const i=window._st.find(x=>x.id==d.add),l=cart.find(x=>x.item_id==i.id);if(l)l.qty=Math.min(l.max,l.qty+1);else{if(!sup()&&!i.price_ngn)return alert("Price not set yet. Ask the owner.");const e0=eff(i);cart.push({item_id:i.id,sku:i.sku,name:i.name,qty:1,max:i.stock,price:e0,min:e0,list:+i.price_ngn||0})}show()}
