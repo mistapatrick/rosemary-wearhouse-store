@@ -40,7 +40,6 @@ function printRcpt(r){let a=$("#rcpt-area");if(!a){a=document.createElement("div
 function showReceipt(r){app.innerHTML=`<div class="row np" style="margin-bottom:8px"><button class="b" id="rp">Print receipt</button><button class="b s" id="rpdf">Save as PDF</button><button class="b o" id="rn">New sale</button><label class="mut" style="margin:0">Paper <select id="pp" style="width:auto;display:inline"><option value="80" ${PAPER()==80?"selected":""}>80 mm</option><option value="58" ${PAPER()==58?"selected":""}>58 mm</option></select></label></div><p class="mut np">Print receipt: choose your thermal printer. Save as PDF: choose "Save as PDF" as the destination. The file is named after the receipt number.</p><div class="rcpt-wrap">${rcptHTML(r)}</div>`;
  $("#rp").onclick=$("#rpdf").onclick=()=>printRcpt(r);$("#rn").onclick=show;$("#pp").onchange=e=>{localStorage.setItem("rw_paper",e.target.value);showReceipt(r)}}
 
-IC.data='<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>';
 const loadCodes=async()=>{const {data:cs}=await sb.from("codes").select("*").order("name");codes={};(cs||[]).forEach(c=>(codes[c.kind]??=[]).push(c.name))};
 let XL;const loadExcel=()=>XL||(XL=new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const t=document.createElement("script");t.src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";t.onload=()=>res(window.ExcelJS);t.onerror=()=>{XL=null;rej(new Error("Could not load the Excel library. Check your internet connection and try again."))};document.head.appendChild(t)}));
 const dlBlob=(name,buf)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)};
@@ -195,6 +194,7 @@ rates:'<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><p
 users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'};
 IC.more='<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>';
 IC.out='<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>';
+IC.data='<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>';
 const closeSheet=()=>{const d=$("#sheet");if(d)d.remove()};
 function nav(){closeSheet();
  const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"],["data","Data"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1]];
