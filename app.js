@@ -1,6 +1,10 @@
-import {createClient} from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
-import {SUPABASE_URL,SUPABASE_ANON_KEY} from "./config.js";
+import * as CFG from "./config.js";
 import {STORE} from "./store.js";
+const {SUPABASE_URL,SUPABASE_ANON_KEY}=CFG;
+/*VENDOR-START*/
+const SBL=await(async()=>{if(CFG.VENDORED){await new Promise(r=>{const s=document.createElement("script");s.src="vendor/supabase.js";s.onload=r;s.onerror=r;document.head.appendChild(s)});if(window.supabase&&window.supabase.createClient)return window.supabase}return import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm")})();
+const createClient=SBL.createClient;
+/*VENDOR-END*/
 const sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 {const pc=document.createElement("link");pc.rel="preconnect";pc.href=SUPABASE_URL;document.head.appendChild(pc)}
 // short-lived cache for read queries; any write clears it
@@ -41,7 +45,7 @@ function showReceipt(r){app.innerHTML=`<div class="row np" style="margin-bottom:
  $("#rp").onclick=$("#rpdf").onclick=()=>printRcpt(r);$("#rn").onclick=show;$("#pp").onchange=e=>{localStorage.setItem("rw_paper",e.target.value);showReceipt(r)}}
 
 const loadCodes=async()=>{const {data:cs}=await sb.from("codes").select("*").order("name");codes={};(cs||[]).forEach(c=>(codes[c.kind]??=[]).push(c.name))};
-let XL;const loadExcel=()=>XL||(XL=new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const t=document.createElement("script");t.src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";t.onload=()=>res(window.ExcelJS);t.onerror=()=>{XL=null;rej(new Error("Could not load the Excel library. Check your internet connection and try again."))};document.head.appendChild(t)}));
+let XL;const loadExcel=()=>XL||(XL=new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const t=document.createElement("script");t.src=CFG.VENDORED?"vendor/exceljs.min.js":"https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";t.onload=()=>res(window.ExcelJS);t.onerror=()=>{XL=null;rej(new Error("Could not load the Excel library. Check your internet connection and try again."))};document.head.appendChild(t)}));
 const dlBlob=(name,buf)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)};
 const styleSheet=(ws,w)=>{ws.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};ws.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF0C1014"}};ws.views=[{state:"frozen",ySplit:1}];ws.columns.forEach((c,i)=>c.width=(w&&w[i])||16)};
 // ---- backup reminder (owner only) ----
@@ -51,6 +55,14 @@ function bkBanner(){if(!BK||tab=="data"||!BK.first&&!BK.last)return"";const sn=+
  const base=BK.last||BK.first,age=Math.floor((Date.now()-base)/864e5);if(age<BK.days)return"";
  return`<div class="note np" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>Time to back up your data.</b> ${BK.last?`Your last backup was ${age} day${age==1?"":"s"} ago.`:"No backup has been exported yet."}</span><button class="b sm" data-go="data">Back up now</button><button class="b o sm" data-snz="1">Remind me tomorrow</button></div>`}
 document.addEventListener("click",e=>{const b=e.target.closest("[data-go],[data-snz]");if(!b)return;if(b.dataset.go){tab=b.dataset.go;nav();show()}else{localStorage.setItem("rw_bk_snooze",String(Date.now()+864e5));show()}});
+async function security(){
+ const {data:fs}=await sb.auth.mfa.listFactors();const ok=((fs&&fs.totp)||[]).filter(x=>x.status==="verified");
+ const lg=sup()?((await cq(()=>sb.from("audit_log").select("*").order("at",{ascending:false}).limit(100))).data||[]):null;
+ const what=r=>r.tbl=="app"?r.op:`${String(r.op).toLowerCase()} ${r.tbl}`,chg=r=>Object.entries(r.changes||{}).map(([k,v])=>`${k}: ${v[0]??"—"} → ${v[1]??"—"}`).join("; ").slice(0,160);
+ return`<h2>${sup()?"Security":"My account"}</h2>
+<div class="card"><h3>Change password</h3><form id="pw"><label>New password (at least 12 characters)<input name="p1" type="password" minlength="12" autocomplete="new-password" required></label><label>Repeat the new password<input name="p2" type="password" minlength="12" autocomplete="new-password" required></label><p class="err" id="pwm"></p><button class="b">Change password</button></form><p class="mut">Use a long phrase that you do not use anywhere else. Never share your password.</p></div>
+<div class="card"><h3>Two-step sign-in (authenticator app)</h3>${ok.length?`<p>✓ Turned on. A 6-digit code is asked for at every sign-in.</p><button class="b o" id="mfa-off" data-f="${esc(ok[0].id)}">Turn off</button>`:`<p class="mut">Adds a 6-digit code from an app such as Google Authenticator or Microsoft Authenticator when you sign in. Strongly recommended for the owner and admin.</p><button class="b s" id="mfa-on">Set up</button><div id="mfa-box"></div>`}</div>
+${lg?`<div class="card tw"><h3>Activity log (last 100 events)</h3><table><tr><th>When</th><th>Who</th><th>What</th><th>Record</th><th>Changes</th></tr>${lg.map(r=>`<tr><td>${esc(new Date(r.at).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}))}</td><td>${esc(r.actor_name||"system")} <span class="mut">${esc(r.actor_role||"")}</span></td><td>${esc(what(r))}</td><td>${esc(r.ref||"")}</td><td class="mut">${esc(chg(r))}</td></tr>`).join("")||'<tr><td colspan="5" class="mut">Nothing recorded yet.</td></tr>'}</table><p class="mut">Prices, discounts, stock confirmations, roles, rates, batches and settings are recorded automatically. Nobody can edit or delete this log from the app. Review it weekly.</p></div>`:""}`}
 async function dataPage(){
  const {data}=await sb.from("settings").select("*").in("key",["last_backup","backup_days"]);const m=Object.fromEntries((data||[]).map(x=>[x.key,x.value])),last=m.last_backup?new Date(m.last_backup):null,days=+m.backup_days||14;
  return`<h2>Backup &amp; import</h2><div class="card"><h3>Back up to Excel</h3><p>Last backup: <b>${last?esc(last.toLocaleString())+" ("+Math.floor((Date.now()-last)/864e5)+" days ago)":"never"}</b></p><p class="mut">One Excel file with items, costs, batches, sales, exchange rates and codes. Keep it somewhere safe and private, because it shows your costs and profit. Copy it to a USB drive or your own cloud storage as well.</p>
@@ -74,7 +86,7 @@ async function doExport(){AC.clear();const btn=$("#bk-go");btn.disabled=true;btn
  add("Exchange rates",["Date","NGN per USD","Source"],fxs.map(f=>[dt(f.day),n(f.rate),f.source]),[14,14,20]);
  add("Codes",["Kind","Name","Code"],cds.map(c=>[c.kind,c.name,c.code]),[12,24,8]);
  const buf=await wb.xlsx.writeBuffer();dlBlob("RosemarysWearHouse_Backup_"+new Date().toISOString().slice(0,10)+".xlsx",buf);
- const {error}=await sb.from("settings").upsert({key:"last_backup",value:new Date().toISOString()});if(error)throw error;await loadBk();show()
+ const {error}=await sb.from("settings").upsert({key:"last_backup",value:new Date().toISOString()});if(error)throw error;Promise.resolve(sb.rpc("log_event",{ev:"export",note:its.length+" items, "+sls.length+" sales"})).catch(()=>{});await loadBk();show()
  }catch(e){fail(e);btn.disabled=false;btn.textContent="Export everything to Excel"}}
 async function doTemplate(){try{const X=await loadExcel(),wb=new X.Workbook();
  const R=wb.addWorksheet("Read me");R.columns=[{width:110}];["HOW TO FILL THIS TEMPLATE","1. Items sheet: one row per item type you bought (not per piece). Put the number of pieces in Qty.","2. Fields marked * are required. Date Bought is required. Ship Date sets the month in the SKU; if blank it uses Date Bought.","3. Dollar items: fill Cost USD each and Exchange rate (naira per dollar at that time). Shipping NGN each is that item's share of shipping.","   Naira-only items: fill Cost NGN each. Or type the final Landed NGN each yourself and it will be used as is.","4. Source: US (default) or Local. Local items have no batch.","5. Sales sheet: one row per item sold. Ref must match an item's Ref. Rows with the same Receipt are grouped into one sale. Stock left = Qty minus pieces sold.","6. Dates can be typed like 2023-05-14 or 14/05/2023 (day first).","7. Delete the example rows (Ref starting EXAMPLE) before importing. Do not rename the sheets or the column headings.","8. Category, Gender and Colour have drop-down lists from your own codes. New categories and colours can be created automatically."].forEach((t,i)=>{const r=R.addRow([t]);if(i==0)r.font={bold:true,size:14}});
@@ -96,8 +108,8 @@ function dateOf(v){if(v===""||v==null)return null;if(v instanceof Date)return is
 const numOf=v=>{if(v===""||v==null)return null;if(typeof v=="number")return v;const n=parseFloat(String(v).replace(/[₦$,\s]/g,""));return isNaN(n)?NaN:n};
 const code3=t=>t.replace(/[^A-Za-z]/g,"").slice(0,3).toUpperCase().padEnd(3,"X");
 async function parseImport(file){const out=$("#imp-out");out.innerHTML='<p class="mut">Reading the file…</p>';window._imp=null;
- try{const X=await loadExcel(),wb=new X.Workbook();await wb.xlsx.load(await file.arrayBuffer());
- const ws=wb.getWorksheet("Items");if(!ws)throw new Error('This file has no sheet named "Items". Please start from the template.');
+ try{if(file.size>10*1024*1024)throw new Error("That file is larger than 10 MB. Split it into smaller files.");const X=await loadExcel(),wb=new X.Workbook();await wb.xlsx.load(await file.arrayBuffer());
+ const ws=wb.getWorksheet("Items");if(!ws)throw new Error('This file has no sheet named "Items". Please start from the template.');if(ws.rowCount>20001)throw new Error("The Items sheet has more than 20,000 rows. Split the file.");
  const errs=[],warns=[],E=(sh,r,m)=>errs.push(`${sh} sheet, row ${r}: ${m}`),auto=$("#imp-auto").checked;
  const rowsOf=(w,req)=>{const H={};w.getRow(1).eachCell((c,i)=>{H[norm(cellVal(c))]=i});const miss=req.filter(k=>!H[k]);if(miss.length){errs.push(`The "${w.name}" sheet is missing these columns: ${miss.join(", ")}`);return[]}
   const o=[];w.eachRow((row,n)=>{if(n==1)return;let any=false;row.eachCell(c=>{if(String(cellVal(c)).trim()!=="")any=true});if(!any)return;o.push({n,g:k=>H[k]?cellVal(row.getCell(H[k])):""})});return o};
@@ -140,7 +152,7 @@ async function runImport(){const P=window._imp,btn=$("#imp-run"),pg=$("#imp-prog
  const send=async(items,sales)=>{const {data,error}=await sb.rpc("import_history",{payload:{codes:first?P.codes:[],items,sales}});first=false;if(error)throw error;for(const k in t)t[k]+=data[k]||0};
  try{for(let i=0;i<P.items.length;i+=100){pg.textContent=`Importing items ${Math.min(i+100,P.items.length)} of ${P.items.length}…`;await send(P.items.slice(i,i+100),[])}
   for(let i=0;i<P.sales.length;i+=50){pg.textContent=`Importing sales ${Math.min(i+50,P.sales.length)} of ${P.sales.length}…`;await send([],P.sales.slice(i,i+50))}
-  if(first)await send([],[]);await loadCodes();window._imp=null;
+  if(first)await send([],[]);await loadCodes();window._imp=null;Promise.resolve(sb.rpc("log_event",{ev:"import",note:t.items+" items, "+t.sales+" sales"})).catch(()=>{});
   $("#imp-out").innerHTML=`<div class="card" style="border-color:var(--ok)"><b>Import finished.</b><br>${t.items} item(s) added${t.items_skipped?`, ${t.items_skipped} already existed (skipped)`:""}.<br>${t.sales} sale(s) added${t.sales_skipped?`, ${t.sales_skipped} already existed (skipped)`:""}.<br><span class="mut">Check the Items, Stock and Analytics tabs. Then make a fresh backup.</span></div>`
  }catch(e){pg.textContent="";btn.disabled=false;fail(new Error((e.message||e)+" Part of the file may have been imported. It is safe to choose the same file again: finished rows are skipped."))}}
 async function loadFx(){const {data}=await sb.rpc("current_fx");if(data)FX=+data;const {data:h}=await sb.from("fx_rates").select("rate").order("day",{ascending:false}).limit(7);FXR=h&&h.length?[Math.min(...h.map(x=>+x.rate)),Math.max(...h.map(x=>+x.rate))]:null}
@@ -163,7 +175,7 @@ function showIdleWarn(sec){let d=$("#idle");if(!d){d=document.createElement("div
  $("#idle-s").textContent=Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0")}
 async function forceOut(auto){me=null;cart=[];BK=null;hideIdleWarn();closeSheet();window._st=window._rs=window._imp=null;const ra=$("#rcpt-area");if(ra)ra.remove();
  try{await sb.auth.signOut({scope:"local"})}catch(_){}
- localStorage.removeItem(LA);if(auto)localStorage.setItem("rw_logout",String(Date.now()));
+ sessionStorage.removeItem("rw_si");localStorage.removeItem(LA);if(auto)localStorage.setItem("rw_logout",String(Date.now()));
  $("#who").textContent="Inventory & POS";$("#fxc").classList.add("hide");$("#cur").classList.add("hide");loginView();
  if(auto){const le=$("#le");le.className="mut";le.textContent=IDLE_MSG}}
 function idleCheck(){if(!me)return;const idle=Date.now()-(+localStorage.getItem(LA)||Date.now());
@@ -174,14 +186,21 @@ async function boot(){
  const {data:{session}}=await sb.auth.getSession();
  if(!session)return loginView();
  const la=+localStorage.getItem(LA);if(la&&Date.now()-la>=IDLE_MS){try{await sb.auth.signOut({scope:"local"})}catch(_){}localStorage.removeItem(LA);loginView();const le=$("#le");le.className="mut";le.textContent=IDLE_MSG;return}
+ const {data:aal}=await sb.auth.mfa.getAuthenticatorAssuranceLevel();if(aal&&aal.nextLevel==="aal2"&&aal.currentLevel!=="aal2")return mfaView();
  const {data}=await sb.from("profiles").select("*").eq("id",session.user.id).single();
  if(!data||!data.active){app.innerHTML=`<div class="card login"><p class="err">This account has no access. Ask the admin.</p></div>`;$("#out").classList.remove("hide");return}
  me=data;localStorage.setItem(LA,String(Date.now()));lastTouch=Date.now();$("#wa").href="https://wa.me/2349053903530?text="+encodeURIComponent(`Hello Business Labs, feedback on the Rosemary's Wear House app from ${me.name||me.email} (${me.role}): `);$("#who").textContent=`${me.name||me.email} · ${me.role}`;$("#out").classList.remove("hide");
-  if(!sup())cur="NGN";await Promise.all([loadCodes(),loadFx(),loadBk()]);chrome();tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
+  if(!sup())cur="NGN";await Promise.all([loadCodes(),loadFx(),loadBk()]);chrome();if(!sessionStorage.getItem("rw_si")){sessionStorage.setItem("rw_si","1");Promise.resolve(sb.rpc("log_event",{ev:"signin",note:""})).catch(()=>{})}tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
 function loginView(){$("#nav").innerHTML="";$("#out").classList.add("hide");
  app.innerHTML=`<form class="card login" id="lf"><h2>Sign in</h2><label>Email<input name="e" type="email" required autocomplete="username"></label><label>Password<input name="p" type="password" required autocomplete="current-password"></label><p class="err" id="le"></p><button class="b w">Sign in</button></form>`;
- $("#lf").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const {error}=await sb.auth.signInWithPassword({email:f.get("e"),password:f.get("p")});
-  if(error)$("#le").textContent="Wrong email or password.";else boot()}}
+ $("#lf").onsubmit=async e=>{e.preventDefault();if(Date.now()<lockUntil){$("#le").className="err";$("#le").textContent="Too many attempts. Wait "+Math.ceil((lockUntil-Date.now())/1000)+" seconds.";return}
+  const f=new FormData(e.target);const {error}=await sb.auth.signInWithPassword({email:String(f.get("e")).trim(),password:f.get("p")});
+  if(error){if(++fails>=5){lockUntil=Date.now()+30000;fails=0}$("#le").className="err";$("#le").textContent="Wrong email or password."}else{fails=0;boot()}}}
+let fails=0,lockUntil=0;
+function mfaView(){$("#nav").innerHTML="";$("#out").classList.remove("hide");
+ app.innerHTML='<form class="card login" id="mf"><h2>Two-step sign-in</h2><p class="mut">Enter the 6-digit code from your authenticator app.</p><label>Code<input name="c" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required></label><p class="err" id="mfe"></p><button class="b w">Verify</button></form>';
+ $("#mf").onsubmit=async e=>{e.preventDefault();const {data:fs}=await sb.auth.mfa.listFactors();const f=((fs&&fs.totp)||[]).find(x=>x.status==="verified");if(!f){$("#mfe").textContent="No authenticator found. Ask the admin.";return}
+  const {error}=await sb.auth.mfa.challengeAndVerify({factorId:f.id,code:String(new FormData(e.target).get("c")).trim()});if(error){$("#mfe").textContent="That code was not accepted. Try the newest code.";return}boot()}}
 $("#out").onclick=()=>forceOut(false);
 const IC={dash:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
 ana:'<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
@@ -195,9 +214,10 @@ users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7
 IC.more='<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>';
 IC.out='<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>';
 IC.data='<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>';
+IC.security='<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>';
 const closeSheet=()=>{const d=$("#sheet");if(d)d.remove()};
 function nav(){closeSheet();
- const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"],["data","Data"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1]];
+ const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"],["data","Data"],["security","Security"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1],["security","Account",1]];
  if(me.role=="admin")all.push(["users","Users"]);
  const ic=k=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[k==="items"&&!sup()?"stock":k]}</svg>`,sec=all.filter(t=>!t[2]),secOn=sec.some(t=>t[0]==tab);
  $("#nav").innerHTML=all.map(([k,l,p])=>`<button data-t="${k}" class="${p?"":"sec "}${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")+(sec.length?`<button data-more="1" class="more ${secOn?"on":""}" aria-label="More options">${ic("more")}<span>More</span></button>`:"");
@@ -207,7 +227,7 @@ function openSheet(sec,ic){closeSheet();const d=document.createElement("div");d.
  document.body.appendChild(d);
  d.onclick=e=>{const b=e.target.closest("button");if(!b){if(e.target.classList.contains("sh-bg"))closeSheet();return}if(b.dataset.out){closeSheet();return $("#out").click()}tab=b.dataset.t;openB=null;nav();show()}}
 const show=async()=>{const my=++seq;bar(1);const tm=setTimeout(()=>{if(my===seq)app.innerHTML='<p class="mut">Loading…</p>'},200);
- try{const h=bkBanner()+await({dash,ana,stock,items,batches,recv,pos,users,rates,data:dataPage}[tab])();if(my!==seq)return;app.innerHTML=h;wire()}
+ try{const h=bkBanner()+await({dash,ana,stock,items,batches,recv,pos,users,rates,data:dataPage,security}[tab])();if(my!==seq)return;app.innerHTML=h;wire()}
  catch(e){if(my===seq)app.innerHTML=`<p class="err">${esc(e.message)}</p>`}
  finally{clearTimeout(tm);if(my===seq)bar(0)}};
 const A=(s,fn)=>app.querySelectorAll(s).forEach(fn);
@@ -304,7 +324,7 @@ async function pos(){
 <div class="card"><h3>Cart</h3>${cart.map((l,i)=>`<div class="row sp" style="margin-bottom:8px"><span style="flex:1"><span class="sku">${esc(l.sku)}</span><br>${esc(l.name)}</span><input type="number" min="1" max="${l.max}" value="${l.qty}" data-cq="${i}" style="width:60px;margin:0"><input type="number" min="${sup()?0:l.min}" value="${l.price}" data-cp="${i}" style="width:100px;margin:0"><button class="b o sm" data-cx="${i}">✕</button></div>`).join("")||'<p class="mut">Empty</p>'}
 <p><b>Total ${ngn(tot)}</b></p><label>Customer (optional)<input id="cu" maxlength="60"></label><label>Payment<select id="pm"><option>Cash</option><option>Bank Transfer</option><option>POS / Card</option><option>Part Payment</option></select></label><label class="row" style="margin:0 0 10px"><input type="checkbox" id="ap" style="width:auto;margin:0" ${localStorage.getItem("rw_ap")=="1"?"checked":""}> Print receipt automatically</label><button class="b w" id="co" ${cart.length?"":"disabled"}>Complete sale</button></div></div><div class="card np"><h3>Recent sales (tap Reprint)</h3>${(rs||[]).map(x=>`<div class="row sp" style="padding:6px 0;border-bottom:1px solid var(--line)"><span><span class="sku">${esc(x.receipt)}</span> ${new Date(x.sold_at).toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}<br><span class="mut">${esc(x.cashier||"")} · ${esc(x.payment||"")}</span></span><span><b>${ngn(x.total)}</b> <button class="b o sm" data-rp="${x.id}">Reprint</button></span></div>`).join("")||'<p class="mut">No sales yet.</p>'}</div>`}
 async function users(){const {data}=await sb.from("profiles").select("*").order("email");
- return`<h2>Users</h2><p class="mut">Set each person's display name (it prints on receipts as the cashier). Create logins in Supabase → Authentication → Users, then set the role here.</p><div class="card tw"><table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th></tr>${data.map(u=>`<tr><td>${esc(u.email)}</td><td><input data-un="${u.id}" value="${esc(u.name)}" maxlength="40" style="margin:0;min-width:140px"></td><td><select data-ur="${u.id}">${["admin","owner","staff"].map(r=>`<option ${r==u.role?"selected":""}>${r}</option>`).join("")}</select></td><td><input type="checkbox" data-ua="${u.id}" ${u.active?"checked":""} style="width:auto"></td></tr>`).join("")}</table></div>`}
+ return`<h2>Users</h2><p class="mut">Set each person's display name (it prints on receipts as the cashier). Create logins in Supabase → Authentication → Users, then come back here, set the role and tick Active (new logins start inactive for safety).</p><div class="card tw"><table><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th></tr>${data.map(u=>`<tr><td>${esc(u.email)}</td><td><input data-un="${u.id}" value="${esc(u.name)}" maxlength="40" style="margin:0;min-width:140px"></td><td><select data-ur="${u.id}">${["admin","owner","staff"].map(r=>`<option ${r==u.role?"selected":""}>${r}</option>`).join("")}</select></td><td><input type="checkbox" data-ua="${u.id}" ${u.active?"checked":""} style="width:auto"></td></tr>`).join("")}</table></div>`}
 function renderResults(){const v=$("#ps").value.toLowerCase().trim();
  $("#pr").innerHTML=v?window._st.filter(i=>(i.sku+i.name+(i.brand||"")).toLowerCase().includes(v)).slice(0,8).map(i=>`<div class="row sp" style="padding:6px 0;border-bottom:1px solid var(--line)"><span><span class="sku">${esc(i.sku)}</span><br>${esc(i.brand||"")} ${esc(i.name)} · ${esc(i.size||"")} · ${i.stock} left</span><button class="b sm" data-add="${i.id}">${ngn(eff(i))}${i.discount_pct>0?" (-"+(+i.discount_pct)+"%)":""} +</button></div>`).join(""):""}
 function wire(){
@@ -341,6 +361,13 @@ function wire(){
  const ap=$("#ap");if(ap)ap.onchange=()=>localStorage.setItem("rw_ap",ap.checked?"1":"0");
  A("[data-rp]",b=>b.onclick=async()=>{const x=window._rs.find(y=>y.id==b.dataset.rp),{data:ls,error}=await sb.from("sale_lines").select("sku,name,qty,unit_price,list_price").eq("sale_id",x.id);if(error)return fail(error);
   showReceipt({no:x.receipt,at:x.sold_at,cashier:x.cashier||"—",customer:x.customer||"",pay:x.payment,reprint:true,lines:ls.map(l=>({sku:l.sku,name:l.name,qty:l.qty,price:l.unit_price,list:l.list_price})),total:x.total})});
+ const pw=$("#pw");if(pw)pw.onsubmit=async e=>{e.preventDefault();const f=new FormData(pw),a=String(f.get("p1")),b=String(f.get("p2")),m=$("#pwm");m.textContent="";
+  if(a!==b){m.textContent="The two passwords do not match.";return}if(a.length<12){m.textContent="Use at least 12 characters.";return}if(/^(.)\1+$/.test(a)||/^(password|12345678|qwerty)/i.test(a)){m.textContent="That password is too easy to guess.";return}
+  const {error}=await sb.auth.updateUser({password:a});if(error){m.textContent=error.message;return}pw.reset();alert("Password changed.")};
+ const mo=$("#mfa-on");if(mo)mo.onclick=async()=>{const {data,error}=await sb.auth.mfa.enroll({factorType:"totp",friendlyName:"Authenticator "+Date.now()});if(error)return fail(error);
+  $("#mfa-box").innerHTML=`<p class="mut">Scan this code with your authenticator app, or type the key by hand.</p><img src="${esc(data.totp.qr_code)}" alt="QR code" width="180" height="180"><p class="sku">${esc(data.totp.secret)}</p><label>6-digit code<input id="mfa-c" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label><button class="b" id="mfa-v">Confirm</button>`;
+  $("#mfa-v").onclick=async()=>{const {error:e2}=await sb.auth.mfa.challengeAndVerify({factorId:data.id,code:$("#mfa-c").value.trim()});if(e2)return fail(e2);alert("Two-step sign-in is now on.");show()}};
+ const mf=$("#mfa-off");if(mf)mf.onclick=async()=>{if(!confirm("Turn off two-step sign-in?"))return;const {error}=await sb.auth.mfa.unenroll({factorId:mf.dataset.f});if(error)return fail(error);show()};
  const bg=$("#bk-go");if(bg)bg.onclick=doExport;
  const bd=$("#bk-d");if(bd)bd.onchange=async()=>{const {error}=await sb.from("settings").upsert({key:"backup_days",value:bd.value});if(error)return fail(error);await loadBk()};
  const t0=$("#imp-tpl");if(t0)t0.onclick=doTemplate;
