@@ -33,6 +33,111 @@ function printRcpt(r){let a=$("#rcpt-area");if(!a){a=document.createElement("div
  addEventListener("afterprint",done);print()}
 function showReceipt(r){app.innerHTML=`<div class="row np" style="margin-bottom:8px"><button class="b" id="rp">Print receipt</button><button class="b s" id="rpdf">Save as PDF</button><button class="b o" id="rn">New sale</button><label class="mut" style="margin:0">Paper <select id="pp" style="width:auto;display:inline"><option value="80" ${PAPER()==80?"selected":""}>80 mm</option><option value="58" ${PAPER()==58?"selected":""}>58 mm</option></select></label></div><p class="mut np">Print receipt: choose your thermal printer. Save as PDF: choose "Save as PDF" as the destination. The file is named after the receipt number.</p><div class="rcpt-wrap">${rcptHTML(r)}</div>`;
  $("#rp").onclick=$("#rpdf").onclick=()=>printRcpt(r);$("#rn").onclick=show;$("#pp").onchange=e=>{localStorage.setItem("rw_paper",e.target.value);showReceipt(r)}}
+
+IC.data='<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>';
+const loadCodes=async()=>{const {data:cs}=await sb.from("codes").select("*").order("name");codes={};(cs||[]).forEach(c=>(codes[c.kind]??=[]).push(c.name))};
+let XL;const loadExcel=()=>XL||(XL=new Promise((res,rej)=>{if(window.ExcelJS)return res(window.ExcelJS);const t=document.createElement("script");t.src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";t.onload=()=>res(window.ExcelJS);t.onerror=()=>{XL=null;rej(new Error("Could not load the Excel library. Check your internet connection and try again."))};document.head.appendChild(t)}));
+const dlBlob=(name,buf)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)};
+const styleSheet=(ws,w)=>{ws.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};ws.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF0C1014"}};ws.views=[{state:"frozen",ySplit:1}];ws.columns.forEach((c,i)=>c.width=(w&&w[i])||16)};
+// ---- backup reminder (owner only) ----
+let BK=null;
+async function loadBk(){if(me.role!="owner")return;try{const [{data:st},{data:f}]=await Promise.all([sb.from("settings").select("*").in("key",["last_backup","backup_days"]),sb.from("items").select("sourced_at").order("sourced_at").limit(1)]);const m=Object.fromEntries((st||[]).map(x=>[x.key,x.value]));BK={last:m.last_backup?new Date(m.last_backup):null,days:+m.backup_days||14,first:f&&f[0]?new Date(f[0].sourced_at):null}}catch(e){BK=null}}
+function bkBanner(){if(!BK||tab=="data"||!BK.first&&!BK.last)return"";const sn=+localStorage.getItem("rw_bk_snooze")||0;if(Date.now()<sn)return"";
+ const base=BK.last||BK.first,age=Math.floor((Date.now()-base)/864e5);if(age<BK.days)return"";
+ return`<div class="note np" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>Time to back up your data.</b> ${BK.last?`Your last backup was ${age} day${age==1?"":"s"} ago.`:"No backup has been exported yet."}</span><button class="b sm" data-go="data">Back up now</button><button class="b o sm" data-snz="1">Remind me tomorrow</button></div>`}
+document.addEventListener("click",e=>{const b=e.target.closest("[data-go],[data-snz]");if(!b)return;if(b.dataset.go){tab=b.dataset.go;nav();show()}else{localStorage.setItem("rw_bk_snooze",String(Date.now()+864e5));show()}});
+async function dataPage(){
+ const {data}=await sb.from("settings").select("*").in("key",["last_backup","backup_days"]);const m=Object.fromEntries((data||[]).map(x=>[x.key,x.value])),last=m.last_backup?new Date(m.last_backup):null,days=+m.backup_days||14;
+ return`<h2>Backup &amp; import</h2><div class="card"><h3>Back up to Excel</h3><p>Last backup: <b>${last?esc(last.toLocaleString())+" ("+Math.floor((Date.now()-last)/864e5)+" days ago)":"never"}</b></p><p class="mut">One Excel file with items, costs, batches, sales, exchange rates and codes. Keep it somewhere safe and private, because it shows your costs and profit. Copy it to a USB drive or your own cloud storage as well.</p>
+<div class="row"><button class="b" id="bk-go">Export everything to Excel</button><label class="mut" style="margin:0">Remind me every <select id="bk-d" style="width:auto;display:inline">${[7,14,30].map(d=>`<option value="${d}" ${d==days?"selected":""}>${d} days</option>`).join("")}</select></label></div></div>
+<div class="card"><h3>Import old records from Excel</h3><p class="mut">For stock and sales recorded before this app. Nothing is saved until you have seen a preview with no errors.</p>
+<ol class="mut" style="padding-left:18px"><li>Download the template and fill it in (Items sheet, and Sales sheet if you have sales records). Delete the example rows.</li><li>Choose your file. The app checks every row and shows what it will create.</li><li>If the preview shows no errors, press <b>Import</b>.</li></ol>
+<p class="mut"><b>How old records are placed:</b> each item goes into a batch for the month it was shipped, and its SKU carries that old month (for example 0323 for March 2023). Records are filed oldest first, so serial numbers follow the real order. Sales keep their original dates, so Analytics shows them in the right months. Importing the same file twice does not create duplicates.</p>
+<div class="row"><button class="b s" id="imp-tpl">Download Excel template</button><label class="b o" style="margin:0;cursor:pointer">Choose your file<input id="imp-file" type="file" accept=".xlsx" class="hide"></label></div>
+<label class="row" style="margin:10px 0 0"><input type="checkbox" id="imp-auto" checked style="width:auto;margin:0"> Create missing categories and colours automatically (3-letter code from the name)</label><div id="imp-out" style="margin-top:12px"></div></div>`}
+async function doExport(){const btn=$("#bk-go");btn.disabled=true;btn.textContent="Preparing…";
+ try{const X=await loadExcel(),wb=new X.Workbook();wb.creator="Rosemary's Wear House";
+ const [its,ics,bts,sls,lns,fxs,cds]=await Promise.all([all(()=>sb.from("items").select("*").order("sourced_at").order("id")),all(()=>sb.from("item_costs").select("*").order("item_id")),all(()=>sb.from("batches").select("*").order("ship_date").order("id")),all(()=>sb.from("sales").select("*").order("sold_at").order("id")),all(()=>sb.from("sale_lines").select("*,sale_costs(unit_cost)").order("id")),all(()=>sb.from("fx_rates").select("*").order("day")),all(()=>sb.from("codes").select("*").order("kind").order("name"))]);
+ const C=Object.fromEntries(ics.map(c=>[c.item_id,c])),B=Object.fromEntries(bts.map(b=>[b.id,b])),I=Object.fromEntries(its.map(i=>[i.id,i])),S=Object.fromEntries(sls.map(x=>[x.id,x])),dt=v=>v?new Date(v):null,n=v=>v==null||v===""?null:+v;
+ const add=(name,cols,rows,w)=>{const ws=wb.addWorksheet(name);ws.columns=cols.map(h=>({header:h}));rows.forEach(r=>ws.addRow(r));styleSheet(ws,w);ws.autoFilter={from:{row:1,column:1},to:{row:1,column:cols.length}}};
+ add("Summary",["Item","Value"],[["Exported on",new Date()],["Exported by",me.name||me.email],["Items",its.length],["Batches",bts.length],["Sales",sls.length],["Sale lines",lns.length]],[22,34]);
+ add("Items",["SKU","Name","Category","Gender","Colour","Brand","Size","Condition","Source","Batch","Status","Qty sent","Qty received","In stock","Cost USD each","Other USD each","Other NGN each","Landed NGN each","Holding NGN each","Price USD","Price NGN","Discount %","Date bought","Received on","Import ref"],
+  its.map(i=>{const c=C[i.id]||{};return[i.sku,i.name,i.category,i.gender,i.colour,i.brand,i.size,i.condition,i.source,B[i.batch_id]?.name||"",i.status,i.qty,i.qty_received,i.stock,n(c.cost_usd),n(c.other_usd),n(c.other_ng),n(c.landed_ngn),n(c.hold_ngn),n(i.price_usd),n(i.price_ngn),n(i.discount_pct),dt(i.sourced_at),dt(i.received_at),i.import_ref]}),[22,26,16,10,12,14,8,16,8,22,11,9,9,9,12,12,12,14,12,10,12,9,14,14,14]);
+ add("Batches",["Name","Ship date","Status","Rate NGN per USD","Shipping NGN","Holding % per month","Pricing mode","Percent"],bts.map(b=>[b.name,dt(b.ship_date),b.status,n(b.fx),n(b.ship_cost_ngn),n(b.hold_pct),b.mode,n(b.pct)]),[26,14,10,14,14,12,12,10]);
+ add("Sales",["Receipt","Date","Cashier","Customer","Payment","Rate NGN per USD","SKU","Item","Qty","Unit price NGN","List price NGN","Discount %","Unit cost NGN","Line total NGN","Line profit NGN"],
+  lns.map(l=>{const s=S[l.sale_id]||{},uc=+(Array.isArray(l.sale_costs)?l.sale_costs[0]?.unit_cost:l.sale_costs?.unit_cost)||0;return[s.receipt,dt(s.sold_at),s.cashier,s.customer,s.payment,n(s.fx),l.sku,l.name,l.qty,n(l.unit_price),n(l.list_price),n(l.disc_pct),uc||null,l.qty*l.unit_price,l.qty*(l.unit_price-uc)]}).sort((a,b)=>(a[1]||0)-(b[1]||0)),[14,18,16,16,14,12,22,26,6,13,13,9,13,14,14]);
+ add("Exchange rates",["Date","NGN per USD","Source"],fxs.map(f=>[dt(f.day),n(f.rate),f.source]),[14,14,20]);
+ add("Codes",["Kind","Name","Code"],cds.map(c=>[c.kind,c.name,c.code]),[12,24,8]);
+ const buf=await wb.xlsx.writeBuffer();dlBlob("RosemarysWearHouse_Backup_"+new Date().toISOString().slice(0,10)+".xlsx",buf);
+ const {error}=await sb.from("settings").upsert({key:"last_backup",value:new Date().toISOString()});if(error)throw error;await loadBk();show()
+ }catch(e){fail(e);btn.disabled=false;btn.textContent="Export everything to Excel"}}
+async function doTemplate(){try{const X=await loadExcel(),wb=new X.Workbook();
+ const R=wb.addWorksheet("Read me");R.columns=[{width:110}];["HOW TO FILL THIS TEMPLATE","1. Items sheet: one row per item type you bought (not per piece). Put the number of pieces in Qty.","2. Fields marked * are required. Date Bought is required. Ship Date sets the month in the SKU; if blank it uses Date Bought.","3. Dollar items: fill Cost USD each and Exchange rate (naira per dollar at that time). Shipping NGN each is that item's share of shipping.","   Naira-only items: fill Cost NGN each. Or type the final Landed NGN each yourself and it will be used as is.","4. Source: US (default) or Local. Local items have no batch.","5. Sales sheet: one row per item sold. Ref must match an item's Ref. Rows with the same Receipt are grouped into one sale. Stock left = Qty minus pieces sold.","6. Dates can be typed like 2023-05-14 or 14/05/2023 (day first).","7. Delete the example rows (Ref starting EXAMPLE) before importing. Do not rename the sheets or the column headings.","8. Category, Gender and Colour have drop-down lists from your own codes. New categories and colours can be created automatically."].forEach((t,i)=>{const r=R.addRow([t]);if(i==0)r.font={bold:true,size:14}});
+ const ih=["Ref*","Name*","Category*","Gender*","Colour*","Brand","Size","Condition","Qty*","Source","Date Bought*","Ship Date","Date Received","Cost USD each","Other USD each","Exchange rate","Shipping NGN each","Cost NGN each","Landed NGN each","Selling price NGN","Selling price USD","Batch name"];
+ const it=wb.addWorksheet("Items");it.columns=ih.map(h=>({header:h}));it.addRow(["EXAMPLE-1","Satin blouse","Blouse","Female","Black","Zara","M","Thrift - Grade A",4,"US",new Date(Date.UTC(2023,2,10)),new Date(Date.UTC(2023,2,25)),new Date(Date.UTC(2023,3,5)),3,0.5,1450,5000,null,null,18000,null,null]);
+ it.addRow(["EXAMPLE-2","Oxford shirt","Shirt","Male","White","Gap","L","Thrift - Grade A",6,"US",new Date(Date.UTC(2023,2,12)),new Date(Date.UTC(2023,2,25)),new Date(Date.UTC(2023,3,5)),2.5,0,1450,5000,null,null,15000,null,null]);styleSheet(it,[12,24,16,10,12,12,8,16,7,8,14,14,14,12,12,12,14,12,14,14,14,20]);
+ const sh=wb.addWorksheet("Sales");sh.columns=["Receipt","Date Sold*","Ref*","Qty*","Price NGN each*","Payment","Customer","Cashier","Exchange rate"].map(h=>({header:h}));
+ sh.addRow([null,new Date(Date.UTC(2023,4,2)),"EXAMPLE-1",2,18000,"Cash","Mrs Bello","Rosemary",1470]);styleSheet(sh,[12,14,12,7,16,14,18,14,12]);
+ const L=wb.addWorksheet("Lists");L.columns=["Category","Gender","Colour","Condition"].map(h=>({header:h}));const kinds=["category","gender","colour","condition"];const mx=Math.max(...kinds.map(k=>(codes[k]||[]).length));
+ for(let r=0;r<mx;r++)L.addRow(kinds.map(k=>(codes[k]||[])[r]||null));styleSheet(L,[22,12,16,18]);
+ const col=(ws,c,f)=>{for(let r=2;r<=1000;r++)ws.getCell(c+r).dataValidation={type:"list",allowBlank:true,formulae:[f]}};
+ col(it,"C",`Lists!$A$2:$A$${mx+1}`);col(it,"D",`Lists!$B$2:$B$${Math.max((codes.gender||[]).length+1,2)}`);col(it,"E",`Lists!$C$2:$C$${Math.max((codes.colour||[]).length+1,2)}`);col(it,"J",'"US,Local"');
+ dlBlob("Rosemarys_Import_Template.xlsx",await wb.xlsx.writeBuffer())}catch(e){fail(e)}}
+// ---- import: read, validate, preview ----
+const norm=h=>String(h??"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const cellVal=c=>{let v=c.value;if(v&&typeof v=="object"&&!(v instanceof Date)){if("result" in v)v=v.result;else if(v.richText)v=v.richText.map(t=>t.text).join("");else if(v.text)v=v.text}return v==null?"":v};
+const noon=d=>new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),12));
+function dateOf(v){if(v===""||v==null)return null;if(v instanceof Date)return isNaN(v)?null:noon(v);if(typeof v=="number")return noon(new Date(Math.round((v-25569)*864e5)));const t=String(v).trim();let m=t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;const d=new Date(Date.UTC(y,+m[2]-1,+m[1],12));return d.getUTCMonth()==+m[2]-1?d:null}m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],12));return null}
+const numOf=v=>{if(v===""||v==null)return null;if(typeof v=="number")return v;const n=parseFloat(String(v).replace(/[₦$,\s]/g,""));return isNaN(n)?NaN:n};
+const code3=t=>t.replace(/[^A-Za-z]/g,"").slice(0,3).toUpperCase().padEnd(3,"X");
+async function parseImport(file){const out=$("#imp-out");out.innerHTML='<p class="mut">Reading the file…</p>';window._imp=null;
+ try{const X=await loadExcel(),wb=new X.Workbook();await wb.xlsx.load(await file.arrayBuffer());
+ const ws=wb.getWorksheet("Items");if(!ws)throw new Error('This file has no sheet named "Items". Please start from the template.');
+ const errs=[],warns=[],E=(sh,r,m)=>errs.push(`${sh} sheet, row ${r}: ${m}`),auto=$("#imp-auto").checked;
+ const rowsOf=(w,req)=>{const H={};w.getRow(1).eachCell((c,i)=>{H[norm(cellVal(c))]=i});const miss=req.filter(k=>!H[k]);if(miss.length){errs.push(`The "${w.name}" sheet is missing these columns: ${miss.join(", ")}`);return[]}
+  const o=[];w.eachRow((row,n)=>{if(n==1)return;let any=false;row.eachCell(c=>{if(String(cellVal(c)).trim()!=="")any=true});if(!any)return;o.push({n,g:k=>H[k]?cellVal(row.getCell(H[k])):""})});return o};
+ const lk=k=>Object.fromEntries((codes[k]||[]).map(x=>[x.toLowerCase(),x])),cat=lk("category"),gen=lk("gender"),col=lk("colour"),newC=[];
+ const items=[],byRef={},pick=(map,raw,kind,sh,n,canAuto)=>{const t=String(raw).trim();if(!t){E(sh,n,kind+" is empty");return null}let v=map[t.toLowerCase()];if(v)return v;if(canAuto&&auto){map[t.toLowerCase()]=t;newC.push({kind:kind.toLowerCase(),name:t,code:code3(t)});return t}E(sh,n,canAuto?`${kind} "${t}" is not in your list (tick the automatic option, or fix the spelling)`:`${kind} "${t}" is not valid. Use one of: ${(codes.gender||[]).join(", ")}`);return null};
+ for(const{n,g}of rowsOf(ws,["ref","name","category","gender","colour","qty","datebought"])){
+  const ref=String(g("ref")).trim(),name=String(g("name")).trim(),N=k=>{const v=numOf(g(k));if(Number.isNaN(v)){E("Items",n,`${k} is not a number`);return null}return v};
+  if(!ref)E("Items",n,"Ref is empty");else if(byRef[ref])E("Items",n,`Ref "${ref}" appears twice`);else if(/^example/i.test(ref))E("Items",n,"Delete the example rows (Ref starting EXAMPLE) before importing");
+  if(!name)E("Items",n,"Name is empty");
+  const c=pick(cat,g("category"),"Category","Items",n,true),ge=pick(gen,g("gender"),"Gender","Items",n,false),co=pick(col,g("colour"),"Colour","Items",n,true);
+  const qty=numOf(g("qty"));if(!(qty>=1)||!Number.isInteger(qty))E("Items",n,"Qty must be a whole number of at least 1");
+  const src=/^l/i.test(String(g("source")).trim())?"local":"us",bought=dateOf(g("datebought"));if(!bought)E("Items",n,"Date Bought is missing or not a valid date");
+  const ship=dateOf(g("shipdate"))||bought,recv=dateOf(g("datereceived"))||ship;if(g("shipdate")!==""&&!dateOf(g("shipdate")))E("Items",n,"Ship Date is not a valid date");
+  const rate=N("exchangerate"),cu=N("costusdeach"),ou=N("otherusdeach"),sp=N("shippingngneach"),cn=N("costngneach"),li=N("landedngneach"),pn=N("sellingpricengn");let pu=N("sellingpriceusd"),landed=null;
+  if(li!=null)landed=li;else if(cu!=null||ou!=null){if(!rate)E("Items",n,"Exchange rate is needed to convert the dollar costs (or fill Landed NGN each)");else landed=((cu||0)+(ou||0))*rate+(sp||0)+(cn||0)}else if(cn!=null||sp!=null)landed=(cn||0)+(sp||0);
+  if(pu==null&&pn!=null&&rate)pu=Math.round(pn/rate*100)/100;if(!ref||!bought)continue;
+  const bn=src=="us"?(String(g("batchname")).trim()||`Imported ${ship.getUTCFullYear()}-${String(ship.getUTCMonth()+1).padStart(2,"0")}`):null;
+  const o={ref,name,category:c,gender:ge,colour:co,brand:String(g("brand")).trim()||null,size:String(g("size")).trim()||null,condition:String(g("condition")).trim()||null,qty,source:src,price_ngn:pn,price_usd:pu,fx:rate,cost_usd:cu,other_usd:ou,other_ng:cn,landed_ngn:landed,sourced_at:bought.toISOString(),received_at:recv.toISOString(),ship_date:src=="us"?ship.toISOString().slice(0,10):null,batch_name:bn,stock:qty,status:"in_stock",_n:n,_ship:ship.getTime(),_bought:bought.getTime()};
+  if(landed==null)o._nocost=true;byRef[ref]=o;items.push(o)}
+ const sales=[],groups={},sws=wb.getWorksheet("Sales"),extra=new Set();
+ if(sws)for(const{n,g}of rowsOf(sws,["datesold","ref","qty","pricengneach"])){const ref=String(g("ref")).trim(),d=dateOf(g("datesold")),q=numOf(g("qty")),p=numOf(g("pricengneach")),rate=numOf(g("exchangerate"));
+  if(!ref)E("Sales",n,"Ref is empty");if(!d)E("Sales",n,"Date Sold is missing or not a valid date");if(!(q>=1)||!Number.isInteger(q))E("Sales",n,"Qty must be a whole number of at least 1");if(p==null||Number.isNaN(p)||p<0)E("Sales",n,"Price NGN each is missing or not a number");
+  if(!ref||!d||!(q>=1)||p==null||Number.isNaN(p))continue;if(!byRef[ref])extra.add(ref);else byRef[ref]._sold=(byRef[ref]._sold||0)+q;
+  const rc=String(g("receipt")).trim(),key=rc?"r:"+rc:`row:${n}:${ref}:${d.toISOString().slice(0,10)}`;
+  let s=groups[key];if(!s){s=groups[key]={key,receipt:rc||null,sold_at:d.toISOString(),payment:String(g("payment")).trim()||null,customer:String(g("customer")).trim()||null,cashier:String(g("cashier")).trim()||null,fx:rate||byRef[ref]?.fx||null,lines:[],_d:d.getTime()};sales.push(s)}s.lines.push({ref,qty:q,price:p})}
+ if(extra.size){const known=new Set(),arr=[...extra];for(let i=0;i<arr.length;i+=150){const {data}=await sb.from("items").select("import_ref").in("import_ref",arr.slice(i,i+150));(data||[]).forEach(x=>known.add(x.import_ref))}arr.filter(r=>!known.has(r)).forEach(r=>errs.push(`Sales sheet: Ref "${r}" does not match any item in the Items sheet or earlier imports`))}
+ let nocost=0;for(const o of items){if(o._sold>o.qty)errs.push(`Items sheet, row ${o._n}: ${o._sold} pieces are recorded as sold but only ${o.qty} were bought (Ref ${o.ref})`);o.stock=Math.max(0,o.qty-(o._sold||0));o.status=o.stock==0?"sold_out":"in_stock";if(o._nocost)nocost++}
+ if(nocost)warns.push(`${nocost} item(s) have no cost information. Profit on their sales will show as 100% until costs are known.`);
+ items.sort((a,b)=>a._ship-b._ship||a._bought-b._bought||a._n-b._n);sales.sort((a,b)=>a._d-b._d);
+ const bm={};items.forEach(o=>{if(o.batch_name){const b=bm[o.batch_name]??={n:o.batch_name,d:o.ship_date,items:0,units:0};b.items++;b.units+=o.qty}});
+ const mmyy=d=>d.slice(5,7)+d.slice(2,4),rev=sales.reduce((a,s)=>a+s.lines.reduce((x,l)=>x+l.qty*l.price,0),0),dates=items.map(o=>o._bought).concat(sales.map(s=>s._d)).sort((a,b)=>a-b),fd=t=>new Date(t).toISOString().slice(0,10);
+ window._imp={codes:newC,items,sales};const K=(l,v)=>`<div class="kpi"><small>${l}</small><b>${v}</b></div>`;
+ out.innerHTML=`<div class="kpis">${K("Items",items.length)}${K("Pieces",items.reduce((a,o)=>a+o.qty,0))}${K("Sales",sales.length)}${K("Sales value",ngn(rev))}${K("Oldest record",dates.length?fd(dates[0]):"—")}${K("Newest record",dates.length?fd(dates.at(-1)):"—")}</div>
+ ${newC.length?`<p class="mut">New codes to create: ${newC.map(c=>esc(c.kind+" "+c.name+" → "+c.code)).join(", ")}</p>`:""}
+ ${Object.keys(bm).length?`<div class="tw"><table><tr><th>Will be filed in batch</th><th>Ship date</th><th>SKU month</th><th class="n">Items</th><th class="n">Pieces</th></tr>${Object.values(bm).map(b=>`<tr><td>${esc(b.n)}</td><td>${esc(b.d)}</td><td class="sku">${mmyy(b.d)}</td><td class="n">${b.items}</td><td class="n">${b.units}</td></tr>`).join("")}</table></div>`:""}
+ ${warns.map(w=>`<p class="mut">⚠ ${esc(w)}</p>`).join("")}
+ ${errs.length?`<div class="note" style="background:#fde8e8;border-color:#e0a0a0;color:#7a1010"><b>${errs.length} problem(s) to fix in your file. Nothing has been imported.</b><br>${errs.slice(0,30).map(esc).join("<br>")}${errs.length>30?`<br>…and ${errs.length-30} more`:""}</div>`:`<button class="b w" id="imp-run">Import ${items.length} item(s) and ${sales.length} sale(s)</button><p class="mut" id="imp-prog"></p>`}`;
+ if(!errs.length)$("#imp-run").onclick=runImport}catch(e){out.innerHTML=`<p class="err">${esc(e.message||e)}</p>`}}
+async function runImport(){const P=window._imp,btn=$("#imp-run"),pg=$("#imp-prog");if(!P)return;btn.disabled=true;const t={items:0,items_skipped:0,sales:0,sales_skipped:0};let first=true;
+ const send=async(items,sales)=>{const {data,error}=await sb.rpc("import_history",{payload:{codes:first?P.codes:[],items,sales}});first=false;if(error)throw error;for(const k in t)t[k]+=data[k]||0};
+ try{for(let i=0;i<P.items.length;i+=100){pg.textContent=`Importing items ${Math.min(i+100,P.items.length)} of ${P.items.length}…`;await send(P.items.slice(i,i+100),[])}
+  for(let i=0;i<P.sales.length;i+=50){pg.textContent=`Importing sales ${Math.min(i+50,P.sales.length)} of ${P.sales.length}…`;await send([],P.sales.slice(i,i+50))}
+  if(first)await send([],[]);await loadCodes();window._imp=null;
+  $("#imp-out").innerHTML=`<div class="card" style="border-color:var(--ok)"><b>Import finished.</b><br>${t.items} item(s) added${t.items_skipped?`, ${t.items_skipped} already existed (skipped)`:""}.<br>${t.sales} sale(s) added${t.sales_skipped?`, ${t.sales_skipped} already existed (skipped)`:""}.<br><span class="mut">Check the Items, Stock and Analytics tabs. Then make a fresh backup.</span></div>`
+ }catch(e){pg.textContent="";btn.disabled=false;fail(new Error((e.message||e)+" Part of the file may have been imported. It is safe to choose the same file again: finished rows are skipped."))}}
 async function loadFx(){const {data}=await sb.rpc("current_fx");if(data)FX=+data;const {data:h}=await sb.from("fx_rates").select("rate").order("day",{ascending:false}).limit(7);FXR=h&&h.length?[Math.min(...h.map(x=>+x.rate)),Math.max(...h.map(x=>+x.rate))]:null}
 function chrome(){const on=sup();if(!$("#fxc")||!$("#cur"))return;$("#fxc").classList.toggle("hide",!on);$("#cur").classList.toggle("hide",!on);$("#fxc").textContent="$1 = ₦"+Math.round(FX).toLocaleString("en-NG");$("#fxc").title=FXR?"7-day range ₦"+Math.round(FXR[0])+" – ₦"+Math.round(FXR[1]):"";$("#cur").textContent=cur=="USD"?"$ USD":"₦ NGN"}
 async function refreshFx(force){try{const {data:st}=await sb.from("settings").select("*");const m=Object.fromEntries((st||[]).map(x=>[x.key,x.value]));if(!force&&m.fx_mode!="auto")return;
@@ -48,7 +153,7 @@ async function boot(){
  if(!data||!data.active){app.innerHTML=`<div class="card login"><p class="err">This account has no access. Ask the admin.</p></div>`;$("#out").classList.remove("hide");return}
  me=data;$("#wa").href="https://wa.me/2349053903530?text="+encodeURIComponent(`Hello Business Labs, feedback on the Rosemary's Wear House app from ${me.name||me.email} (${me.role}): `);$("#who").textContent=`${me.name||me.email} · ${me.role}`;$("#out").classList.remove("hide");
  const {data:cs}=await sb.from("codes").select("*").order("name");codes={};(cs||[]).forEach(c=>(codes[c.kind]??=[]).push(c.name));
- if(!sup())cur="NGN";await loadFx();chrome();tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
+ if(!sup())cur="NGN";await loadFx();await loadBk();chrome();tab=sup()?"dash":"recv";nav();show();if(sup()){refreshFx();setInterval(refreshFx,3*36e5)}}
 function loginView(){$("#nav").innerHTML="";$("#out").classList.add("hide");
  app.innerHTML=`<form class="card login" id="lf"><h2>Sign in</h2><label>Email<input name="e" type="email" required autocomplete="username"></label><label>Password<input name="p" type="password" required autocomplete="current-password"></label><p class="err" id="le"></p><button class="b w">Sign in</button></form>`;
  $("#lf").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const {error}=await sb.auth.signInWithPassword({email:f.get("e"),password:f.get("p")});
@@ -67,7 +172,7 @@ IC.more='<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circl
 IC.out='<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>';
 const closeSheet=()=>{const d=$("#sheet");if(d)d.remove()};
 function nav(){closeSheet();
- const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1]];
+ const all=sup()?[["dash","Dashboard",1],["items","Items",1],["batches","Batches",1],["stock","Stock",1],["ana","Analytics"],["recv","Receiving"],["pos","POS"],["rates","Rates"],["data","Data"]]:[["recv","Receiving",1],["pos","POS",1],["items","Stock",1]];
  if(me.role=="admin")all.push(["users","Users"]);
  const ic=k=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[k==="items"&&!sup()?"stock":k]}</svg>`,sec=all.filter(t=>!t[2]),secOn=sec.some(t=>t[0]==tab);
  $("#nav").innerHTML=all.map(([k,l,p])=>`<button data-t="${k}" class="${p?"":"sec "}${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")+(sec.length?`<button data-more="1" class="more ${secOn?"on":""}" aria-label="More options">${ic("more")}<span>More</span></button>`:"");
@@ -76,7 +181,7 @@ function openSheet(sec,ic){closeSheet();const d=document.createElement("div");d.
  d.innerHTML=`<div class="sh-bg"></div><div class="sh-box"><div class="sh-grip"></div>${sec.map(([k,l])=>`<button data-t="${k}" class="${tab==k?"on":""}">${ic(k)}<span>${l}</span></button>`).join("")}<button data-out="1">${ic("out")}<span>Sign out</span></button></div>`;
  document.body.appendChild(d);
  d.onclick=e=>{const b=e.target.closest("button");if(!b){if(e.target.classList.contains("sh-bg"))closeSheet();return}if(b.dataset.out){closeSheet();return $("#out").click()}tab=b.dataset.t;openB=null;nav();show()}}
-const show=async()=>{app.innerHTML='<p class="mut">Loading…</p>';try{app.innerHTML=await({dash,ana,stock,items,batches,recv,pos,users,rates}[tab])();wire()}catch(e){app.innerHTML=`<p class="err">${esc(e.message)}</p>`}};
+const show=async()=>{app.innerHTML='<p class="mut">Loading…</p>';try{app.innerHTML=bkBanner()+await({dash,ana,stock,items,batches,recv,pos,users,rates,data:dataPage}[tab])();wire()}catch(e){app.innerHTML=`<p class="err">${esc(e.message)}</p>`}};
 const A=(s,fn)=>app.querySelectorAll(s).forEach(fn);
 async function dash(){
  const [it,ic,sl]=await Promise.all([all(()=>sb.from("items").select("id,status,stock,qty,discount_pct").order("id")),all(()=>sb.from("item_costs").select("item_id,landed_ngn").order("item_id")),all(()=>sb.from("sale_lines").select("qty,unit_price,list_price,sale_costs(unit_cost),sales(fx)").order("id"))]);
@@ -205,6 +310,10 @@ function wire(){
  const ap=$("#ap");if(ap)ap.onchange=()=>localStorage.setItem("rw_ap",ap.checked?"1":"0");
  A("[data-rp]",b=>b.onclick=async()=>{const x=window._rs.find(y=>y.id==b.dataset.rp),{data:ls,error}=await sb.from("sale_lines").select("sku,name,qty,unit_price,list_price").eq("sale_id",x.id);if(error)return fail(error);
   showReceipt({no:x.receipt,at:x.sold_at,cashier:x.cashier||"—",customer:x.customer||"",pay:x.payment,reprint:true,lines:ls.map(l=>({sku:l.sku,name:l.name,qty:l.qty,price:l.unit_price,list:l.list_price})),total:x.total})});
+ const bg=$("#bk-go");if(bg)bg.onclick=doExport;
+ const bd=$("#bk-d");if(bd)bd.onchange=async()=>{const {error}=await sb.from("settings").upsert({key:"backup_days",value:bd.value});if(error)return fail(error);await loadBk()};
+ const t0=$("#imp-tpl");if(t0)t0.onclick=doTemplate;
+ const ifl=$("#imp-file");if(ifl)ifl.onchange=()=>{if(ifl.files[0])parseImport(ifl.files[0])};
  A("[data-un]",i=>i.onchange=async()=>{const {error}=await sb.from("profiles").update({name:i.value.trim()}).eq("id",i.dataset.un);if(error)fail(error)});
  A("[data-ur]",s=>s.onchange=async()=>{const {error}=await sb.from("profiles").update({role:s.value}).eq("id",s.dataset.ur);if(error)fail(error)});
  A("[data-ua]",s=>s.onchange=async()=>{const {error}=await sb.from("profiles").update({active:s.checked}).eq("id",s.dataset.ua);if(error)fail(error)})}
